@@ -1,0 +1,116 @@
+{
+  "dataset_path": "D:\\IST\\MeMEC\\Tese\\MATLAB - 1D Model\\Modelos\\Tronconi1998\\Data Set\\Tabela_Inputs_Final.csv",
+  "engines": null,
+  "fuel": "HFO",
+  "substrate": {
+    "cpsi": 46,
+    "wall_thickness_m": 0.00043
+  },
+  "kinetics": {
+    "k0ads": 8500000.0,
+    "Eads": 9000.0,
+    "k0NO": 25000000000.0,
+    "ENO": 18600.0,
+    "aging_KK0": 1.0,
+    "k0d": 800000000.0,
+    "E0d": 26000.0,
+    "beta": 0.32,
+    "f": 0.01,
+    "Deff": 1e-06,
+    "Dmol": 8e-05,
+    "M_bar_kg_mol": 0.02896,
+    "gas": {
+      "R_cal": 1.987,
+      "R_J": 8.314,
+      "M_exhaust_g_mol": 29.0,
+      "M_NO_g_mol": 30.01
+    }
+  },
+  "tuning": {
+    "kNO": 1.0,
+    "kads": 1.0,
+    "Deff": 1.0,
+    "k0d": 1.0
+  },
+  "targets": {
+    "cycle_NO_frac": 0.6,
+    "mode_NO_frac": 0.8,
+    "cycle_slip_ppm": 10.0,
+    "mode_slip_ppm": 20.0
+  },
+  "sweep": {
+    "volume_start_fraction": 1.5,
+    "volume_step_m3": 0.2,
+    "volume_min_m3": 0.2,
+    "volumes_m3": null,
+    "length_m": null,
+    "refine": true,
+    "refine_tol_m3": 0.02,
+    "fouling": 0.15,
+    "aging_KK0": 0.8,
+    "tuning": {
+      "kNO": 1.0,
+      "kads": 1.0,
+      "Deff": 1.0,
+      "k0d": 1.0
+    },
+    "verbose": true
+  },
+  "alpha_loop": {
+    "alpha0": 0.8,
+    "dalpha": 0.02,
+    "alpha_min": 0.3,
+    "alpha_max": 1.2,
+    "max_iter": 200,
+    "bracket_tol": 0.0001,
+    "minimize_alpha": false,
+    "verbose": false
+  },
+  "solver": {
+    "n_nodes": 120,
+    "newton_max_iter": 200,
+    "newton_line_search_steps": 40,
+    "newton_step_tol": 1e-12,
+    "theta_floor": 1e-09,
+    "theta_ceil": 0.999999999,
+    "theta0_guess": 0.02,
+    "resnorm_tol": 1e-06,
+    "resnorm_tol_strict": 1e-10
+  },
+  "urea": {
+    "mass_fraction": 0.4,
+    "density_kg_m3": 1109.0,
+    "M_urea_kg_mol": 0.06006,
+    "M_exhaust_kg_mol": 0.02896,
+    "nh3_per_urea": 2.0
+  },
+  "columns": {
+    "engine": "Engine",
+    "length": "Implemented_Lenght_[m]",
+    "volume": "Implemented_Volume_[m3]",
+    "area": "Implemented_Area_[m2]",
+    "engine_speed": "Engine_Speed_[rpm]",
+    "rated_power": "Rated_Power_[kW]",
+    "load": "LoadTest",
+    "weight": "Weight",
+    "power": "Engine_Power_[kW]",
+    "lambda_": "Lamda",
+    "sfoc": "SFOC_[g/kWh]",
+    "fuel_consumption": "Fuel_Consumption_[kgh]",
+    "T_in": "T_in_[C]",
+    "NO_in": "NO_in_[ppm]",
+    "NO_out": "NO_out_[ppm]"
+  },
+  "dataset_format": {
+    "separator": ";",
+    "decimal": ",",
+    "encoding": "utf-8-sig",
+    "load_is_fraction": true,
+    "weight_is_percent": true,
+    "temperature_unit": "C"
+  },
+  "pressure_Pa": 101325.0,
+  "tier": "III",
+  "tier_power_law_only": true,
+  "output_dir": "D:\\IST\\MeMEC\\Tese\\MATLAB - 1D Model\\Modelos\\TV_SCR_APP\\examples\\Resultados"
+}
