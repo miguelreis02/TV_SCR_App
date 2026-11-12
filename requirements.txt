@@ -1,0 +1,10 @@
+# Nucleo de calculo
+numpy>=1.22
+scipy>=1.8
+pandas>=1.4
+
+# Opcional: figuras (tvscr.plotting)
+matplotlib>=3.5
+
+# Opcional: testes
+pytest>=7.0
