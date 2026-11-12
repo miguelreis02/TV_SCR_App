@@ -23,7 +23,7 @@
       "R_cal": 1.987,
       "R_J": 8.314,
       "M_exhaust_g_mol": 29.0,
-      "M_NO_g_mol": 46.01
+      "M_NOx_g_mol": 46.01
     }
   },
   "tuning": {

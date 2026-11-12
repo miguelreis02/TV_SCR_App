@@ -28,7 +28,7 @@ from .alpha_loop import AlphaLoopOptions
 from .batch import BatchResult, run_all_volume_sweeps
 from .dataset import ColumnMap, DatasetFormat, EngineDataset
 from .geometry import ReactorGeometry, SubstrateGeometry
-from .kinetics import KineticParameters, KineticTuning
+from .kinetics import GasConstants, KineticParameters, KineticTuning
 from .operating import EngineCase
 from .solver import SolverOptions
 from .substrate_sweep import SubstrateSweepResult, substrate_sweep
@@ -47,6 +47,13 @@ def _unwrap_optional(tp):
     return tp
 
 
+#: Campos renomeados: ``{classe: {nome_antigo: nome_novo}}``. Permite abrir
+#: cenarios JSON gravados antes da mudanca de nome.
+_RENAMED_FIELDS = {
+    GasConstants: {"M_NO_g_mol": "M_NOx_g_mol"},
+}
+
+
 def _build(cls, value):
     """Constroi um dataclass a partir de ``dict``, recursivamente.
 
@@ -60,6 +67,10 @@ def _build(cls, value):
         return value
     if not isinstance(value, dict):
         raise TypeError(f"{cls.__name__}: esperava dict, recebi {type(value).__name__}")
+
+    renamed = _RENAMED_FIELDS.get(cls, {})
+    if any(k in value for k in renamed):
+        value = {renamed.get(k, k): v for k, v in value.items()}
 
     known = {f.name for f in fields(cls)}
     unknown = set(value) - known

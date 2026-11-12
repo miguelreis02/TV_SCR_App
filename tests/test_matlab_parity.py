@@ -48,7 +48,7 @@ SCENARIO = dict(fouling=0.15, aging_KK0=0.80)
 SUBSTRATE = SubstrateGeometry(cpsi=46, wall_thickness_m=0.43e-3)
 # O MATLAB convertia ppm -> g/kWh com M_NO = 30.01 g/mol (NO); a omissao
 # passou a ser a do NO2 (46.01 g/mol), como exige o NOx Technical Code.
-KINETICS_MATLAB = KineticParameters(gas=GasConstants(M_NO_g_mol=30.01))
+KINETICS_MATLAB = KineticParameters(gas=GasConstants(M_NOx_g_mol=30.01))
 
 RTOL = 1e-9        # tolerancia relativa nas grandezas continuas
 ATOL = 1e-12

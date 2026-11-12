@@ -214,7 +214,7 @@ def run_cycle(case: EngineCase,
 
     NO_out_ppm = NO_in * (1.0 - X_NO / 100.0)
     NO_gkWh = specific_nox_gkwh(NO_out_ppm, mdot, case.power_kW,
-                                kin.gas.M_NO_g_mol, kin.gas.M_exhaust_g_mol)
+                                kin.gas.M_NOx_g_mol, kin.gas.M_exhaust_g_mol)
     urea_Lh = urea_flow_Lh(alpha_vec, NO_in, mdot, urea)
 
     # ---- ponderacao do ciclo ------------------------------------------- #

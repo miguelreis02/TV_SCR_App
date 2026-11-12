@@ -490,7 +490,7 @@ Para obter exatamente os números dos scripts originais:
 | Comprimento L | `1.2` m |
 | Nós axiais | `120` |
 
-Com estes valores e a massa molar do NOx igual à do NO (`GasConstants(M_NO_g_mol=30.01)`,
+Com estes valores e a massa molar do NOx igual à do NO (`GasConstants(M_NOx_g_mol=30.01)`,
 só acessível pela biblioteca), DG1 dá `V_crítico = 1.540 m³`, igual ao MATLAB até ao
 arredondamento de máquina. Por omissão a aplicação usa a do NO₂ (46.01 g/mol),
 como exige o NOx Technical Code, e o volume crítico sai maior.
