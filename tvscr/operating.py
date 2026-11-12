@@ -85,11 +85,14 @@ def nox_limit_gkwh(engine_speed_rpm: float, tier: str = "III",
 def specific_nox_gkwh(NO_ppm: np.ndarray | float,
                       mass_flow_kgs: np.ndarray | float,
                       power_kW: np.ndarray | float,
-                      M_NO_g_mol: float = 30.01,
+                      M_NO_g_mol: float = 46.01,
                       M_exhaust_g_mol: float = 29.0):
     """Converte NO [ppm] em NOx especifico [g/kWh].
 
-    ``NO[g/kWh] = ppm * 3600 * mdot * M_NO / (P * M_exh * 1000)``
+    ``NOx[g/kWh] = ppm * 3600 * mdot * M_NO2 / (P * M_exh * 1000)``
+
+    O NOx especifico e expresso como NO2 (MARPOL Anexo VI / NOx Technical
+    Code), pelo que ``M_NO_g_mol`` e por omissao a massa molar do NO2.
     """
     return (np.asarray(NO_ppm, dtype=float) * 3600.0
             * np.asarray(mass_flow_kgs, dtype=float) * M_NO_g_mol
@@ -99,7 +102,7 @@ def specific_nox_gkwh(NO_ppm: np.ndarray | float,
 def nox_ppm_from_specific(NO_gkwh: np.ndarray | float,
                           mass_flow_kgs: np.ndarray | float,
                           power_kW: np.ndarray | float,
-                          M_NO_g_mol: float = 30.01,
+                          M_NO_g_mol: float = 46.01,
                           M_exhaust_g_mol: float = 29.0):
     """Inversa de :func:`specific_nox_gkwh`: NOx especifico [g/kWh] -> [ppm]."""
     return (np.asarray(NO_gkwh, dtype=float) * np.asarray(power_kW, dtype=float)

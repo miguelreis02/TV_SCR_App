@@ -26,7 +26,8 @@ este README documenta o modelo e o porte.
 
 Comparação contra os CSV de referência gerados pelo MATLAB
 (`Geometric_Sweep_Alpha_Loop/Results/`), cenário `Fouling = 0.15`,
-`KK0 = 0.80`, CPSI 46, parede 0.43 mm:
+`KK0 = 0.80`, CPSI 46, parede 0.43 mm, NOx específico com `M_NO = 30.01` g/mol
+(como no MATLAB; ver §8 — a omissão passou a ser a do NO₂):
 
 | motor | linhas | erro rel. máx. (ciclo) | erro rel. máx. (modos) | V_crit Python | V_crit MATLAB |
 |-------|--------|------------------------|------------------------|---------------|---------------|
@@ -276,6 +277,7 @@ documentadas porque algumas surpreendem à leitura:
 | tema | MATLAB | aqui | porquê |
 |---|---|---|---|
 | α calibrado | `precompute` **exigia** `alpha_DG<k>.mat`, mesmo sendo depois substituído a cada iteração do loop | opcional (`case.alpha_calibrated`); `calibrate_alpha` recalibra a partir das medições | um motor novo não tem `.mat`, e o varrimento não usa esse α |
+| massa molar do NOx | `M_NO = 30.01` g/mol (NO) na conversão ppm → g/kWh | `46.01` g/mol (NO₂), `GasConstants.M_NO_g_mol` | a MARPOL Anexo VI / NOx Technical Code exprime o NOx específico como NO₂; com NO o NOx em g/kWh vinha subestimado em 35 % (fator 30.01/46.01) e o reator subdimensionado. Para paridade com o MATLAB: `GasConstants(M_NO_g_mol=30.01)` |
 | limite Tier III | `9·n^-0.2` em toda a gama | regra MARPOL completa por omissão (patamares em `n < 130` e `n ≥ 2000`); `tier_power_law_only=True` volta ao original | coincidem entre 130 e 2000 rpm (os 513 rpm do dataset); fora dessa gama a lei de potência dá o valor errado |
 | `Fouling` / `KK0` | defaults escondidos (0.15 / 0.80) dentro de `fill_defaults` | `VolumeSweepOptions(fouling=..., aging_KK0=...)`, sem omissão implícita (caso limpo por omissão) | um cenário de projeto não deve estar escondido num default |
 | nº de motores / modos | `DGlist = 1:5`, 4 modos D2 | descoberto do ficheiro; qualquer nº de modos | escalabilidade |

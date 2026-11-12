@@ -11,7 +11,8 @@ MATLAB em ``Geometric_Sweep_Alpha_Loop/Results/``, motor a motor:
 O cenario tem de ser o dos defaults do MATLAB a data em que a referencia foi
 gerada: ``Fouling = 0.15``, ``KK0 = 0.80``, CPSI 46, parede 0.43 mm, alvos
 60 %/10 ppm (ciclo) e 80 %/20 ppm (modo), alpha de arranque 0.80 com passo
-de 2 %, e o limite Tier III pela lei de potencia pura (``9*n^-0.2``).
+de 2 %, o limite Tier III pela lei de potencia pura (``9*n^-0.2``) e o NOx
+especifico calculado com a massa molar do NO (30.01 g/mol), e nao do NO2.
 
 Correr com pytest, ou directamente::
 
@@ -30,7 +31,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tvscr import (AlphaLoopOptions, EmissionTargets, EngineDataset,
-                   KineticParameters, SubstrateGeometry, VolumeSweepOptions,
+                   GasConstants, KineticParameters, SubstrateGeometry, VolumeSweepOptions,
                    volume_sweep)
 
 # --------------------------------------------------------------------- #
@@ -45,6 +46,9 @@ ENGINES = ["DG1", "DG2", "DG3", "DG4", "DG5"]
 # Cenario dos defaults do MATLAB usados para gerar a referencia.
 SCENARIO = dict(fouling=0.15, aging_KK0=0.80)
 SUBSTRATE = SubstrateGeometry(cpsi=46, wall_thickness_m=0.43e-3)
+# O MATLAB convertia ppm -> g/kWh com M_NO = 30.01 g/mol (NO); a omissao
+# passou a ser a do NO2 (46.01 g/mol), como exige o NOx Technical Code.
+KINETICS_MATLAB = KineticParameters(gas=GasConstants(M_NO_g_mol=30.01))
 
 RTOL = 1e-9        # tolerancia relativa nas grandezas continuas
 ATOL = 1e-12
@@ -64,7 +68,7 @@ def _sweep(engine: str):
     """
     ds = EngineDataset.from_csv(CSV_INPUTS)
     case = ds.build_case(engine, substrate=SUBSTRATE,
-                         kinetics=KineticParameters(),
+                         kinetics=KINETICS_MATLAB,
                          tier_power_law_only=True)
     v_start = 1.5 * case.geometry.volume_m3
     return volume_sweep(
