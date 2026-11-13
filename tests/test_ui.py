@@ -2,16 +2,20 @@
 Testes da interface: construcao da janela, recolha e validacao dos inputs.
 
 Nao testam o calculo (isso e o resto da suite) -- testam que a janela monta o
-:class:`tvscr.RunScenario` certo a partir do formulario, e que rejeita valores
-invalidos com uma mensagem que identifica o campo.
+:class:`tvscr.RunScenario` certo a partir do formulario, que rejeita valores
+invalidos com uma mensagem que identifica o campo, e que o painel de resultados
+mostra os numeros que a biblioteca devolveu.
 
 Sao automaticamente ignorados onde nao haja tkinter ou ecra disponivel.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import sys
 import json
+import struct
+import time
 import types
 from pathlib import Path
 
@@ -25,7 +29,7 @@ tk = pytest.importorskip("tkinter")
 from tvscr import (KineticParameters, KineticTuning, RunScenario,   # noqa: E402
                    VolumeSweepOptions)
 from tvscr_ui.main_window import MainWindow                       # noqa: E402
-from tvscr_ui.widgets import FieldError                           # noqa: E402
+from tvscr_ui.widgets import FieldError, format_number            # noqa: E402
 
 CSV_INPUTS = Path(r"D:\IST\MeMEC\Tese\MATLAB - 1D Model\Modelos\Tronconi1998"
                   r"\Data Set\Tabela_Inputs_Final.csv")
@@ -557,3 +561,299 @@ def test_exhaust_flow_button_says_which_mode_is_missing_data(window, monkeypatch
     _fill_manual(window, modes)
     window._fill_exhaust_flow()
     assert "2" in seen.get("msg", "")
+
+
+# --------------------------------------------------------------------- #
+#  Layout: barra lateral, paginas e cartoes
+# --------------------------------------------------------------------- #
+def test_tabs_are_grouped_in_the_sidebar(window):
+    """Os oito separadores estao na barra lateral, em tres grupos com titulo."""
+    groups = [w.cget("text") for w in window.form.tabs.winfo_children()
+              if isinstance(w, tk.Label)]
+    assert groups == ["DADOS DO PROJETO", "MODELO DO CATALISADOR", "CÁLCULO"]
+    # a barra lateral nao rola com o formulario
+    assert window._is_inside_form(window.form.tabs) is False
+
+
+def test_only_the_selected_page_takes_space(window):
+    """Uma pagina alta nao pode obrigar as outras a rolar."""
+    window.form.select("cinetica")
+    window.update()
+    for key in window.form.keys:
+        in_grid = window.form.page(key).winfo_manager() == "grid"
+        assert in_grid is (key == "cinetica"), key
+
+
+def test_next_and_previous_walk_the_pages_in_order(window):
+    window.form.select("motor")
+    visited = ["motor"]
+    for _ in range(len(window.form.keys) - 1):
+        window.form.select_next()
+        visited.append(window.form.current)
+    assert visited == window.form.keys
+
+    window.form.select_next()                       # nao passa do fim
+    assert window.form.current == "saida"
+    window.form.select_previous()
+    assert window.form.current == "alpha"
+
+
+def test_mode_table_only_takes_space_in_manual_entry(window):
+    window.source.set("csv")
+    window.update()
+    assert window._modes_card.winfo_manager() == ""
+    assert window._csv_frame.winfo_manager() == "grid"
+
+    window.source.set("manual")
+    window.update()
+    assert window._modes_card.winfo_manager() == "grid"
+    assert window._csv_frame.winfo_manager() == ""
+
+
+def test_unit_has_its_own_column_after_the_field(window):
+    """Rotulo, campo e unidade em colunas fixas: os campos ficam alinhados."""
+    field = window.f_pressure
+    assert field.label.cget("text") == "Pressão"
+    assert field.unit_label.cget("text") == "Pa"
+    assert (int(field.unit_label.grid_info()["column"])
+            > int(field.entry.grid_info()["column"])
+            > int(field.label.grid_info()["column"]))
+    assert window.f_fouling.unit_label.cget("text") == "–"   # adimensional
+
+
+def test_parameters_with_help_show_a_marker(window):
+    assert window.f_KK0.help is not None            # tem explicacao
+    assert window.f_k0NO.help is None               # nao tem
+
+
+@pytest.mark.parametrize("value, text", [
+    (2.5e10, "2.5e10"), (8.5e6, "8.5e6"), (8.0e8, "8e8"),
+    (101325.0, "101325"), (18.6e3, "18600"), (0.43e-3, "0.00043"),
+    (1e-4, "0.0001"), (1e-6, "1e-6"), (8e-5, "8e-5"), (0.02896, "0.02896"),
+    (0.8, "0.8"), (1.0, "1"), (0.0, "0"), (-2.5e-7, "-2.5e-7"),
+    (120, "120"), (None, ""), ("DG1", "DG1"),
+])
+def test_numbers_are_shown_in_a_readable_form(value, text):
+    assert format_number(value) == text
+
+
+def test_shown_numbers_read_back_exactly(window):
+    """A forma curta e so apresentacao: o valor lido e o mesmo, bit a bit."""
+    k = KineticParameters()
+    for field, value in ((window.f_k0ads, k.k0ads), (window.f_k0NO, k.k0NO),
+                         (window.f_k0d, k.k0d), (window.f_Deff, k.Deff),
+                         (window.f_Dmol, k.Dmol), (window.f_Mbar, k.M_bar_kg_mol),
+                         (window.f_wall, 0.43e-3), (window.f_v_step, 1.0 / 3.0)):
+        field.set(value)
+        assert field.value() == value
+
+
+# --------------------------------------------------------------------- #
+#  Valor invalido: a janela leva o utilizador ao campo
+# --------------------------------------------------------------------- #
+def test_invalid_field_opens_its_page_and_flags_it(window, monkeypatch):
+    shown = []
+    monkeypatch.setattr("tvscr_ui.main_window.messagebox.showerror",
+                        lambda title, msg, **k: shown.append(msg))
+    _fill_manual(window)
+    window.form.select("motor")
+    window.f_KK0.set("abc")                         # campo de outro separador
+
+    assert window._collect_or_report() is None
+    assert "Envelhecimento KK0" in shown[0]
+    assert window.form.current == "cinetica"
+    assert window.form.is_flagged("cinetica")
+
+    window.f_KK0.set(0.8)
+    assert window._collect_or_report() is not None
+    assert not any(window.form.is_flagged(key) for key in window.form.keys)
+
+
+def test_invalid_table_cell_opens_the_engine_page(window, monkeypatch):
+    monkeypatch.setattr("tvscr_ui.main_window.messagebox.showerror",
+                        lambda *a, **k: None)
+    modes = [dict(m) for m in MANUAL_MODES]
+    modes[2].pop("power_kW")
+    _fill_manual(window, modes)
+    window.form.select("saida")
+
+    assert window._collect_or_report() is None
+    assert window.form.current == "motor"
+    assert window.form.is_flagged("motor")
+    window.form.clear_flags()
+
+
+# --------------------------------------------------------------------- #
+#  Painel de resultados
+# --------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def sweep_result(window):
+    """Um varrimento verdadeiro (motor de tres modos), corrido uma so vez."""
+    _fill_manual(window)
+    scenario, engine = window._collect()
+    return scenario.run_one(engine)
+
+
+def test_results_panel_has_the_console_as_one_of_its_tabs(window):
+    assert window.console is window.results.console
+    for key in ("resumo", "modos", "varrimento", "grafico", "registo"):
+        window.results.select(key)
+        assert window.results.current == key
+    window.results.select("resumo")
+
+
+def test_summary_shows_the_critical_volume_next_to_the_targets(window,
+                                                               sweep_result):
+    panel = window.results
+    panel.show_volume([sweep_result])
+    window.update()
+    crit = sweep_result.at_critical()
+
+    assert panel.has_results
+    assert panel.tile_volume.value_text == \
+        f"{sweep_result.critical_volume_m3:.3f} m³"
+    assert f"{sweep_result.critical_area_m2:.3f}" in panel.tile_volume.note_text
+    assert panel.tile_nox.value_text.startswith(f"{crit['NOx_ciclo_gkWh']:.4f}")
+    assert f"{sweep_result.targets.cycle_NO_gkWh:.4f}" in panel.tile_nox.note_text
+    assert panel.tile_slip.value_text.startswith(f"{crit['slip_ciclo_ppm']:.3f}")
+    # um resultado so: nao ha tabela de comparacao
+    assert panel._compare.winfo_manager() == ""
+
+
+def test_modes_table_has_one_row_per_mode(window, sweep_result):
+    panel = window.results
+    panel.show_volume([sweep_result])
+    rows = panel.modes_tree.get_children()
+    assert len(rows) == len(sweep_result.load_pct)
+    j = sweep_result.critical_index
+    assert panel.modes_tree.set(rows[0], "alpha") == f"{sweep_result.alpha[j, 0]:.3f}"
+
+
+def test_sweep_table_has_one_row_per_volume_and_marks_the_critical(window,
+                                                                   sweep_result):
+    panel = window.results
+    panel.show_volume([sweep_result])
+    tree = panel.sweep_tree
+    rows = tree.get_children()
+    assert len(rows) == sweep_result.volume_m3.size
+
+    volumes = [float(tree.set(row, "v")) for row in rows]
+    assert volumes == sorted(volumes, reverse=True)
+
+    critical = [row for row in rows if "critico" in tree.item(row, "tags")]
+    assert len(critical) == 1
+    assert float(tree.set(critical[0], "v")) == pytest.approx(
+        sweep_result.critical_volume_m3, abs=1e-3)
+    failed = [row for row in rows if "falha" in tree.item(row, "tags")]
+    assert len(failed) == int((~sweep_result.ok).sum())
+
+
+def test_summary_says_so_when_no_volume_is_admissible(window):
+    _fill_manual(window)
+    v_max = window.f_v_max.raw()
+    window.f_v_max.set(0.6)                         # pequeno de mais
+    try:
+        scenario, engine = window._collect()
+    finally:
+        window.f_v_max.set(v_max)        # o reset entre testes nao repoe este campo
+    result = scenario.run_one(engine)
+    assert not np.isfinite(result.critical_volume_m3)
+
+    panel = window.results
+    panel.show_volume([result])
+    assert panel.tile_volume.value_text == "Sem solução"
+    assert "0.60" in panel.tile_volume.note_text
+    assert panel.tile_nox.value_text == "—"
+    # os modos mostrados sao os do maior volume avaliado
+    assert len(panel.modes_tree.get_children()) == len(result.load_pct)
+
+
+def test_several_results_are_compared_and_one_can_be_picked(window, sweep_result):
+    other = dataclasses.replace(sweep_result, engine="MOTOR-Y")
+    panel = window.results
+    panel.select("resumo")
+    panel.show_volume([sweep_result, other])
+    window.update()
+
+    assert len(panel.items_tree.get_children()) == 2
+    assert panel._compare.winfo_manager() == "grid"
+    assert panel.selected_title == sweep_result.engine
+
+    panel.items_tree.selection_set("1")
+    window.update()
+    assert panel.selected_title == "MOTOR-Y"
+    assert "MOTOR-Y" in panel.tile_volume.caption_text
+
+
+def test_substrate_comparison_marks_the_smallest_volume(window):
+    _fill_manual(window)
+    window.f_sweep_substrate.set(True)
+    window.substrate_table.set_rows([{"cpsi": 46, "wall_mm": 0.43},
+                                     {"cpsi": 400, "wall_mm": 5.0}])  # impossivel
+    scenario, _ = window._collect()
+    sweep = scenario.run_substrate_sweep()
+
+    panel = window.results
+    panel.show_substrates(sweep)
+    window.update()
+    tree = panel.items_tree
+    rows = tree.get_children()
+    assert len(rows) == 2
+    assert "★" in tree.set(rows[0], "obs")
+    assert "falha" in tree.item(rows[1], "tags")
+    assert panel.selected_title.startswith("MOTOR-X · CPSI 46")
+
+
+def test_clearing_goes_back_to_the_empty_state(window, sweep_result):
+    panel = window.results
+    panel.show_volume([sweep_result])
+    panel.clear()
+    assert panel.has_results is False
+    assert panel.selected_title is None
+    assert not panel.sweep_tree.get_children()
+
+
+def test_log_tab_is_marked_when_text_arrives_while_hidden(window):
+    panel = window.results
+    panel.select("registo")
+    panel.select("resumo")
+    assert panel.log_unread is False
+
+    window.console.write("linha nova")
+    assert panel.log_unread is True
+    panel.select("registo")
+    assert panel.log_unread is False
+    panel.select("resumo")
+
+
+def test_plot_is_drawn_to_the_size_of_the_panel(sweep_result):
+    pytest.importorskip("matplotlib")
+    from tvscr_ui.results import _figure_png
+
+    for size in ((900, 240), (1000, 520)):          # numa linha e em 2x2
+        png = _figure_png(sweep_result, *size)
+        assert png[:8] == b"\x89PNG\r\n\x1a\n"
+        assert struct.unpack(">II", png[16:24]) == size
+
+
+def test_running_ends_on_the_summary(window, monkeypatch):
+    """Do botao ao resultado: registo durante o calculo, resumo no fim."""
+    monkeypatch.setattr("tvscr_ui.main_window.messagebox.askyesno",
+                        lambda *a, **k: True)       # sem pasta de resultados
+    _fill_manual(window)
+    window._on_run()
+    assert window._running
+    assert window.results.current == "registo"
+
+    deadline = time.time() + 120
+    while window._running and time.time() < deadline:
+        window.update()
+        time.sleep(0.02)
+
+    assert not window._running
+    assert window.results.current == "resumo"
+    assert window.results.has_results
+    assert window.results.tile_volume.value_text.endswith("m³")
+    assert window.status.cget("text").startswith("Concluído")
+    assert "VOLUME CRÍTICO" in window.console.dump()
+    window.results.clear()

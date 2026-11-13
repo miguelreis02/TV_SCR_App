@@ -67,6 +67,7 @@ A **calibração de α** (`get_NOx_DG<k>.m` → `tvscr.calibrate_alpha`) reprodu
 | `tvscr/substrate_sweep.py` | (novo) comparação de pares CPSI / parede |
 | `tvscr_ui/`              | (novo) interface gráfica — não existia no MATLAB |
 | `tvscr_ui/paged.py`      | (novo) separadores e tabela de introdução manual |
+| `tvscr_ui/results.py`    | (novo) painel de resultados: resumo, modos, varrimento, gráfico e registo |
 
 `sweep_engine.m` **não** foi portado: destinava-se a varrimentos 1-D/2-D em L e
 A, que deixaram de existir quando o método passou a varrer o volume.
@@ -96,15 +97,21 @@ Duplo clique em `TV_SCR.bat`, ou `python app.py` num terminal com o Python
 certo (ver [INSTRUCOES.md](INSTRUCOES.md) §3).
 
 Fundo verde, campos brancos, um rótulo por parâmetro e ajuda ao passar o rato.
-As oito secções de inputs são páginas escondidas, escolhidas nos separadores do
-topo. Os dados do motor vêm de um CSV ou são introduzidos à mão numa tabela. O
-cálculo corre numa *thread* separada, com a consola a mostrar a mesma tabela
-que os scripts MATLAB imprimiam. Os inputs completos gravam-se e carregam-se
-como `.json` (o mesmo `RunScenario` que a biblioteca usa) — e, em introdução
-manual, esse `.json` leva os dados do motor dentro, ficando auto-suficiente.
+As oito secções de inputs são páginas escondidas, escolhidas nos separadores da
+barra lateral, agrupados em três blocos (dados do projeto, modelo do
+catalisador, cálculo). Os dados do motor vêm de um CSV ou são introduzidos à
+mão numa tabela. O cálculo corre numa *thread* separada. Por baixo do
+formulário, o painel de resultados mostra o volume crítico em destaque
+(*Resumo*), o ponto de operação por modo, a tabela e o gráfico do varrimento, e
+o *Registo* — a consola, com a mesma tabela que os scripts MATLAB imprimiam.
+Os inputs completos gravam-se e carregam-se como `.json` (o mesmo `RunScenario`
+que a biblioteca usa) — e, em introdução manual, esse `.json` leva os dados do
+motor dentro, ficando auto-suficiente.
 
 A interface não calcula nada: monta um `RunScenario` e chama a biblioteca.
-Ver [INSTRUCOES.md](INSTRUCOES.md) para o guia campo a campo.
+Ver [INSTRUCOES.md](INSTRUCOES.md) para o guia campo a campo e
+[ALTERACOES_LAYOUT.md](ALTERACOES_LAYOUT.md) para o registo das alterações ao
+layout da janela.
 
 ### Biblioteca
 
@@ -317,7 +324,8 @@ python -m pytest tests -q
 - `tests/test_exhaust.py` — o cálculo do caudal de escape, incluindo o AFR por
   balanço elementar e a margem de 10 % da coluna de consumo do dataset.
 - `tests/test_ui.py` — a janela monta o `RunScenario` certo a partir do
-  formulário e rejeita valores inválidos identificando o campo.
+  formulário, rejeita valores inválidos levando o utilizador ao campo, e o
+  painel de resultados mostra os números que a biblioteca devolveu.
 
 Os testes de paridade são automaticamente ignorados se os ficheiros MATLAB não
 estiverem presentes; os da interface, se não houver `tkinter` ou ecrã.

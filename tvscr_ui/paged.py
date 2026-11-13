@@ -3,6 +3,7 @@ Separadores (paginas escondidas), botoes de opcao e tabela editavel.
 
 ``PagedForm`` substitui o formulario de tres colunas: cada seccao de inputs
 passa a ser uma pagina, escondida ate ser escolhida no separador respectivo.
+Os separadores sao verticais e agrupados, para caberem numa barra lateral.
 
 ``RadioGroup`` desenha o proprio indicador -- circulo branco com ponto preto
 quando escolhido -- porque o ``tk.Radiobutton`` nativo pinta o interior todo
@@ -18,7 +19,7 @@ import tkinter as tk
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from .theme import C, F
-from .widgets import FieldError, Tooltip
+from .widgets import FieldError, Tooltip, ghost_button
 
 __all__ = ["PagedForm", "Column", "EditableTable", "ModeTable", "RadioGroup"]
 
@@ -27,62 +28,195 @@ __all__ = ["PagedForm", "Column", "EditableTable", "ModeTable", "RadioGroup"]
 #  Separadores
 # ====================================================================== #
 class PagedForm(tk.Frame):
-    """Barra de separadores + area de paginas, uma visivel de cada vez."""
+    """Separadores verticais agrupados + area de paginas, uma visivel de cada vez.
 
-    def __init__(self, parent):
+    Os separadores vivem em ``self.tabs``. Por omissao ficam a esquerda das
+    paginas; com ``nav_parent`` sao criados dentro de outro contentor (a barra
+    lateral da janela), que os posiciona.
+
+    Por cima das paginas ha um cabecalho com o titulo e a descricao da pagina
+    activa, e os botoes «Anterior» / «Seguinte» para percorrer as paginas pela
+    ordem em que foram criadas.
+
+    So a pagina activa ocupa espaco: as outras sao retiradas da grelha. Assim
+    a altura do formulario e a da pagina que se esta a ver, e uma pagina alta
+    (a tabela de modos, por exemplo) nao obriga as outras a rolar.
+    """
+
+    HEAD_GAP = 12
+
+    def __init__(self, parent, nav_parent=None):
         super().__init__(parent, bg=C.BG)
-        self.tabs = tk.Frame(self, bg=C.BG)
-        self.tabs.pack(fill="x")
-        self.area = tk.Frame(self, bg=C.BG_PANEL, highlightbackground=C.BORDER,
-                             highlightthickness=1)
+        own_nav = nav_parent is None
+        self.tabs = tk.Frame(self if own_nav else nav_parent, bg=C.NAV_BG)
+        if own_nav:
+            self.tabs.pack(side="left", fill="y", padx=(0, 12))
+
+        body = tk.Frame(self, bg=C.BG)
+        body.pack(side="left", fill="both", expand=True)
+
+        # --- cabecalho da pagina ---
+        head = tk.Frame(body, bg=C.BG)
+        head.pack(fill="x", pady=(0, self.HEAD_GAP))
+        self._head = head
+        steps = tk.Frame(head, bg=C.BG)
+        steps.pack(side="right", anchor="s")
+        self.btn_prev = ghost_button(steps, "◀  Anterior", self.select_previous)
+        self.btn_prev.pack(side="left")
+        self._counter = tk.Label(steps, text="", bg=C.BG, fg=C.TEXT_DIM,
+                                 font=F.BASE, width=7)
+        self._counter.pack(side="left")
+        self.btn_next = ghost_button(steps, "Seguinte  ▶", self.select_next)
+        self.btn_next.pack(side="left")
+
+        text = tk.Frame(head, bg=C.BG)
+        text.pack(side="left", fill="x", expand=True)
+        self._title = tk.Label(text, text="", bg=C.BG, fg=C.TITLE,
+                               font=F.PAGE_TITLE, anchor="w")
+        self._title.pack(fill="x")
+        self._subtitle = tk.Label(text, text="", bg=C.BG, fg=C.TEXT_DIM,
+                                  font=F.BASE, anchor="w")
+        self._subtitle.pack(fill="x")
+
+        # --- paginas, empilhadas na mesma celula ---
+        self.area = tk.Frame(body, bg=C.BG)
         self.area.pack(fill="both", expand=True)
         self.area.rowconfigure(0, weight=1)
         self.area.columnconfigure(0, weight=1)
 
-        self._pages: Dict[str, Tuple[tk.Button, tk.Frame]] = {}
+        self._pages: Dict[str, _Tab] = {}
         self._order: List[str] = []
         self._current: Optional[str] = None
         self._on_change: Optional[Callable[[str], None]] = None
 
     # ------------------------------------------------------------------ #
-    def add_page(self, key: str, label: str, tooltip: str = "") -> tk.Frame:
-        """Cria uma pagina e o seu separador; devolve o frame da pagina."""
-        button = tk.Button(self.tabs, text=label, relief="flat", bd=0,
-                           font=F.BASE, cursor="hand2", padx=13, pady=6,
-                           bg=C.TAB_BG, fg=C.TAB_FG,
-                           activebackground=C.TAB_HOVER, activeforeground=C.TAB_FG,
-                           command=lambda k=key: self.select(k))
-        button.pack(side="left", padx=(0, 2))
-        if tooltip:
-            Tooltip(button, tooltip)
+    def add_group(self, title: str) -> None:
+        """Titulo de um grupo de separadores (os que forem criados a seguir)."""
+        first = not self.tabs.winfo_children()
+        tk.Label(self.tabs, text=title, bg=C.NAV_BG, fg=C.NAV_GROUP,
+                 font=F.SMALL_BOLD, anchor="w", padx=16).pack(
+                     fill="x", pady=(4 if first else 14, 3))
 
-        page = tk.Frame(self.area, bg=C.BG_PANEL, padx=12, pady=10)
+    def add_page(self, key: str, label: str, tooltip: str = "") -> tk.Frame:
+        """Cria uma pagina e o seu separador; devolve o frame da pagina.
+
+        ``tooltip`` e a descricao curta da pagina: aparece por baixo do titulo
+        quando a pagina esta aberta e ao passar o rato sobre o separador.
+        """
+        row = tk.Frame(self.tabs, bg=C.NAV_BG)
+        row.pack(fill="x")
+        accent = tk.Frame(row, bg=C.NAV_BG, width=4)
+        accent.pack(side="left", fill="y")
+        flag = tk.Label(row, text="", bg=C.NAV_BG, fg=C.FLAG, font=F.BOLD,
+                        width=2)
+        flag.pack(side="right")
+        button = tk.Button(row, text=label, relief="flat", bd=0, anchor="w",
+                           font=F.BASE, cursor="hand2", padx=12, pady=6,
+                           bg=C.NAV_BG, fg=C.NAV_FG, highlightthickness=0,
+                           activebackground=C.NAV_ACTIVE_BG,
+                           activeforeground=C.NAV_ACTIVE_FG,
+                           command=lambda k=key: self.select(k))
+        button.pack(side="left", fill="x", expand=True)
+        if tooltip:
+            Tooltip(button, tooltip, delay_ms=700)
+
+        page = tk.Frame(self.area, bg=C.BG)
         page.grid(row=0, column=0, sticky="nsew")
 
-        self._pages[key] = (button, page)
+        tab = _Tab(key, label, tooltip, row, accent, button, flag, page)
+        self._pages[key] = tab
         self._order.append(key)
+        for widget in (row, button, flag):
+            widget.bind("<Enter>", lambda _e, t=tab: self._paint(t, hover=True),
+                        add="+")
+            widget.bind("<Leave>", lambda _e, t=tab: self._paint(t), add="+")
+
         if self._current is None:
             self.select(key)
         else:
-            # As paginas estao empilhadas na mesma celula: a que acaba de ser
-            # criada fica por cima. Devolver o lugar a pagina activa, senao a
-            # ultima criada aparecia sob o separador da primeira.
-            self._pages[self._current][1].tkraise()
+            # A pagina acabada de criar fica por cima e na grelha: devolver o
+            # lugar a pagina activa, senao a ultima criada aparecia sob o
+            # separador da primeira.
+            page.grid_remove()
+            self._pages[self._current].page.tkraise()
+            self._refresh_steps()
         return page
+
+    def _paint(self, tab: "_Tab", hover: bool = False) -> None:
+        active = tab.key == self._current
+        bg = (C.NAV_ACTIVE_BG if active else C.NAV_HOVER if hover else C.NAV_BG)
+        tab.row.configure(bg=bg)
+        tab.flag.configure(bg=bg)
+        tab.accent.configure(bg=C.ACCENT if active else bg)
+        tab.button.configure(bg=bg,
+                             fg=C.NAV_ACTIVE_FG if active else C.NAV_FG,
+                             font=F.BOLD if active else F.BASE)
+
+    def _refresh_steps(self) -> None:
+        index = self._order.index(self._current)
+        self._counter.configure(text=f"{index + 1} / {len(self._order)}")
+        self.btn_prev.configure(state="normal" if index > 0 else "disabled")
+        self.btn_next.configure(
+            state="normal" if index < len(self._order) - 1 else "disabled")
 
     def select(self, key: str) -> None:
         if key not in self._pages:
             raise KeyError(f"pagina desconhecida: {key}")
-        for other, (button, page) in self._pages.items():
-            active = other == key
-            button.configure(bg=C.TAB_ACTIVE_BG if active else C.TAB_BG,
-                             fg=C.TAB_ACTIVE_FG if active else C.TAB_FG,
-                             font=F.BOLD if active else F.BASE)
-            if active:
-                page.tkraise()
         self._current = key
+        for tab in self._pages.values():
+            self._paint(tab)
+            if tab.key != key:
+                tab.page.grid_remove()
+        tab = self._pages[key]
+        tab.page.grid()
+        tab.page.tkraise()
+        self._title.configure(text=tab.label)
+        self._subtitle.configure(text=tab.description)
+        self._refresh_steps()
         if self._on_change:
             self._on_change(key)
+
+    def select_next(self) -> None:
+        index = self._order.index(self._current)
+        if index < len(self._order) - 1:
+            self.select(self._order[index + 1])
+
+    def select_previous(self) -> None:
+        index = self._order.index(self._current)
+        if index > 0:
+            self.select(self._order[index - 1])
+
+    # ------------------------------------------------------------------ #
+    def flag(self, key: str, on: bool = True) -> None:
+        """Assinala (ou deixa de assinalar) um separador com um campo invalido."""
+        self._pages[key].flag.configure(text="●" if on else "")
+
+    def clear_flags(self) -> None:
+        for tab in self._pages.values():
+            tab.flag.configure(text="")
+
+    def is_flagged(self, key: str) -> bool:
+        return bool(self._pages[key].flag.cget("text"))
+
+    def tallest_height(self) -> int:
+        """Altura pedida pela pagina mais alta, com o cabecalho [px].
+
+        Serve para reservar ao formulario um espaco que nao mude ao trocar de
+        separador, embora so a pagina activa esteja na grelha.
+        """
+        pages = max((tab.page.winfo_reqheight() for tab in self._pages.values()),
+                    default=0)
+        return self._head.winfo_reqheight() + self.HEAD_GAP + pages
+
+    def key_of(self, widget) -> Optional[str]:
+        """Chave da pagina a que ``widget`` pertence (``None`` se a nenhuma)."""
+        by_page = {tab.page: key for key, tab in self._pages.items()}
+        node = widget
+        while node is not None:
+            if node in by_page:
+                return by_page[node]
+            node = getattr(node, "master", None)
+        return None
 
     @property
     def current(self) -> Optional[str]:
@@ -96,7 +230,24 @@ class PagedForm(tk.Frame):
         self._on_change = callback
 
     def page(self, key: str) -> tk.Frame:
-        return self._pages[key][1]
+        return self._pages[key].page
+
+
+class _Tab:
+    """Um separador e a sua pagina."""
+
+    __slots__ = ("key", "label", "description", "row", "accent", "button",
+                 "flag", "page")
+
+    def __init__(self, key, label, description, row, accent, button, flag, page):
+        self.key = key
+        self.label = label
+        self.description = description
+        self.row = row
+        self.accent = accent
+        self.button = button
+        self.flag = flag
+        self.page = page
 
 
 # ====================================================================== #
@@ -240,7 +391,8 @@ class EditableTable(tk.Frame):
                              relief="flat", justify="right",
                              insertbackground=C.FIELD_FG, highlightthickness=1,
                              highlightbackground=C.BORDER, highlightcolor=C.RUN_BG)
-            entry.grid(row=grid_row, column=i + 1, padx=2, pady=1, sticky="ew")
+            entry.grid(row=grid_row, column=i + 1, padx=2, pady=1, sticky="ew",
+                       ipady=1)
             var.trace_add("write", lambda *_a, w=entry: w.configure(bg=C.FIELD_BG))
             cells[col.key] = (var, entry)
             widgets.append(entry)
@@ -288,7 +440,7 @@ class EditableTable(tk.Frame):
                         entry.configure(bg=C.ERROR_FIELD)
                         raise FieldError(
                             f'{self.row_noun} {index}: "{col.label}" não pode '
-                            f"ficar em branco.")
+                            f"ficar em branco.", widget=entry)
                     record[col.key] = None
                     continue
                 try:
@@ -297,11 +449,12 @@ class EditableTable(tk.Frame):
                     entry.configure(bg=C.ERROR_FIELD)
                     raise FieldError(
                         f'{self.row_noun} {index}, "{col.label}": '
-                        f'"{var.get().strip()}" não é um número.')
+                        f'"{var.get().strip()}" não é um número.', widget=entry)
             out.append(record)
         if not out and not allow_empty:
+            first = next(iter(self._rows[0][1].values()))[1]
             raise FieldError(f"Introduza pelo menos uma linha "
-                             f"({self.row_noun.lower()} 1).")
+                             f"({self.row_noun.lower()} 1).", widget=first)
         return out
 
 

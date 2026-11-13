@@ -93,31 +93,72 @@ Se faltar alguma dependência, o programa diz qual e não abre a janela.
 ## 4. O ecrã
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│  TV SCR — Dimensionamento de sistemas SCR-deNOx    [logo TV] │  título
-├──────────────────────────────────────────────────────────────┤
-│ [1 Motor][2 Geometria][3 Alvos][4 Cinética][5 Calibração]    │  separadores
-│ [6 Varrimento][7 Loop de α][8 Numérico e saída]              │
-├──────────────────────────────────────────────────────────────┤
-│                                                              │
-│   inputs da secção escolhida (as outras ficam escondidas)    │  página
-│                                                              │
-├──────────────────────────────────────────────────────────────┤
-│ [▶ Correr] [Repor] [Carregar] [Gravar] [Registo] [Limpar]    │  ações
-├──────────────────────────────────────────────────────────────┤
-│  consola: tabela do varrimento, resultado e ficheiros        │  resultados
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│ TECNOVERITAS SCR DIMENSIONING TOOL                           [logo TV] │ título
+├─────────────────┬──────────────────────────────────────────────────────┤
+│ DADOS DO PROJETO│ 1 · Dados do motor            [◀ Anterior] 1/8 [▶]   │
+│ ▌1 · Motor      │ ┌──────────────────────────┐ ┌───────────────────┐   │ página de
+│  2 · Geometria  │ │ cartão                   │ │ cartão            │   │ inputs
+│  3 · Alvos      │ │ rótulo ⓘ [campo] unidade │ │                   │   │ (só a do
+│ MODELO DO CAT.  │ └──────────────────────────┘ └───────────────────┘   │ separador
+│  4 · Cinética   │                                                      │ escolhido)
+│  5 · Calibração ├═══════════ divisor arrastável ═══════════════════════┤
+│ CÁLCULO         │ [Resumo][Modos][Varrimento][Gráfico][Registo]        │
+│  6 · Varrimento │ ┌──────────────┐┌────────┐┌────────┐┌──────┐┌──────┐ │ painel de
+│  7 · Loop de α  │ │VOLUME CRÍTICO││ NOx    ││ slip   ││ X_NO ││ureia │ │ resultados
+│  8 · Numérico   │ │ 1.540 m³     ││ + alvo ││ + alvo ││      ││      │ │
+│ CENÁRIO         │ └──────────────┘└────────┘└────────┘└──────┘└──────┘ │
+│  Carregar…      │                                                      │
+│  Gravar…        │                                                      │
+│  Repor omissões │                                                      │
+│ [▶ Correr dim.] │                                                      │
+├─────────────────┴──────────────────────────────────────────────────────┤
+│ Pronto                         F5 correr · Ctrl+O · Ctrl+S · Ctrl+PgDn │ estado
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-As oito secções de inputs são **páginas escondidas**: só se vê uma de cada vez,
-escolhida no separador respetivo. A barra de ações e a consola ficam sempre
-visíveis, e **rolar na consola não mexe no formulário** (e vice-versa).
+**Barra lateral (à esquerda).** Os oito separadores de inputs, agrupados em
+três blocos — *Dados do projeto*, *Modelo do catalisador* e *Cálculo* — seguidos
+das ações sobre o cenário e, sempre visível ao fundo, do botão
+**▶ Correr dimensionamento**. Um ponto vermelho ao lado de um separador
+assinala que ele tem um campo com valor inválido.
+
+**Página de inputs (em cima).** As oito secções são **páginas escondidas**: só
+se vê a do separador escolhido, com o título e a descrição no topo. Os botões
+**◀ Anterior** / **Seguinte ▶** percorrem as páginas pela ordem. Dentro de cada
+página os campos estão agrupados em cartões, com o rótulo, o campo e a unidade
+em colunas alinhadas.
+
+**Painel de resultados (em baixo).** Cinco separadores: *Resumo*, *Modos*,
+*Varrimento*, *Gráfico* e *Registo* (ver §7). O *Registo* é a consola de
+sempre; os outros mostram os mesmos números de forma estruturada.
+
+**Divisor.** A linha entre a página de inputs e os resultados arrasta-se com o
+rato para dar mais altura a uma ou a outra. Um duplo clique no divisor repõe o
+ajuste automático. **Rolar nos resultados não mexe no formulário** (e
+vice-versa).
+
+**Barra de estado (ao fundo).** Diz o que a aplicação está a fazer — durante o
+cálculo, com uma barra de progresso e o tempo decorrido — e lembra os atalhos
+de teclado:
+
+| atalho | faz |
+|---|---|
+| `F5` (ou `Ctrl+Enter`) | Correr dimensionamento |
+| `Ctrl+O` | Carregar cenário |
+| `Ctrl+S` | Gravar cenário |
+| `Ctrl+PgDn` / `Ctrl+PgUp` | Separador seguinte / anterior |
 
 Não é preciso percorrer todos os separadores: todos os campos têm valor por
 omissão, tirando os dados do motor. Na prática, para um primeiro cálculo basta
 o separador **1 · Dados do motor**.
 
-**Passe o rato sobre o nome de um parâmetro** para ver uma explicação curta.
+**O «i» num círculo ao lado de um parâmetro** indica que ele tem uma explicação
+curta: passe o rato sobre o «i» (ou sobre o nome do parâmetro) para a ver.
+
+Os números muito grandes ou muito pequenos aparecem em notação científica curta
+(`2.5e10`, `1e-6`); pode escrevê-los assim ou por extenso, com ponto ou vírgula
+decimal.
 
 ---
 
@@ -128,10 +169,11 @@ CSV** ou **Introdução manual**.
 
 ### A partir de um ficheiro CSV
 
-1. **Ficheiro (CSV)** — carregue no `...` e escolha o ficheiro de inputs. A
-   consola confirma quantos motores encontrou.
-2. **Motor** — escolha da lista. A consola mostra o número de modos, o limite
-   MARPOL, a gama de caudais de escape e o NO à entrada.
+1. **Ficheiro (CSV)** — carregue em **Procurar…** e escolha o ficheiro de
+   inputs. A lista «Motor» passa a ter os motores que ele traz.
+2. **Motor** — escolha da lista. Logo por baixo aparece o que o ficheiro traz
+   para esse motor: o número de modos, o limite MARPOL, a gama de caudais de
+   escape e o NO à entrada (a mesma informação fica no *Registo*).
 3. No separador **2 · Geometria**, indique o **Comprimento L** do monolito (fica
    fixo; é a área frontal que varia).
 4. No separador **4 · Cinética**, confirme o **Envelhecimento KK0** e o
@@ -141,7 +183,13 @@ CSV** ou **Introdução manual**.
    nem esse volume cumprir, não há solução no intervalo e a aplicação diz-lho.
 6. No separador **8 · Numérico e saída**, escolha a **pasta de resultados**. Se
    deixar em branco, nada é escrito em disco (a aplicação avisa).
-7. Prima **▶ Correr dimensionamento**.
+7. Prima **▶ Correr dimensionamento** (barra lateral, ou `F5`).
+
+Durante o cálculo o painel de resultados mostra o *Registo* a encher; no fim
+passa sozinho ao *Resumo*, com o volume crítico em destaque.
+
+Se algum campo tiver um valor inválido, a aplicação abre o separador onde ele
+está, põe o cursor nesse campo (a vermelho claro) e diz qual é o problema.
 
 Para correr todos os motores de uma vez, ligue **«Correr todos os motores do
 ficheiro»**. Nesse caso os campos *Motor*, *L* e *A* ficam inertes — a
@@ -150,8 +198,9 @@ volumes críticos.
 
 ### Introduzindo os dados à mão
 
-Escolha **Introdução manual**. Aparece uma tabela com uma linha por modo do
-ciclo de ensaio:
+Escolha **Introdução manual**. O cartão do ficheiro dá lugar à identificação
+do motor e, por baixo, a toda a largura da página, aparece a tabela dos modos
+do ciclo de ensaio, com uma linha por modo:
 
 | campo | obrigatório | nota |
 |---|---|---|
@@ -177,7 +226,7 @@ Botões abaixo da tabela:
 |---|---|
 | **+ Adicionar modo** / **− Remover último** | Ajustam o número de linhas |
 | **Limpar tabela** | Esvazia tudo |
-| **Calcular caudal de escape** | Preenche a coluna «Caudal esc.» a partir do SFOC, do λ e do combustível — e imprime na consola o caudal de combustível, o de ar e o de escape de cada modo (ver §6, «Caudal de escape») |
+| **Calcular caudal de escape** | Preenche a coluna «Caudal esc.» a partir do SFOC, do λ e do combustível — e mostra no *Registo* o caudal de combustível, o de ar e o de escape de cada modo (ver §6, «Caudal de escape») |
 | **Copiar do ficheiro CSV** | Traz os dados do motor escolhido no modo CSV, para os editar à mão |
 
 Linhas completamente em branco são ignoradas, portanto pode deixar linhas a mais.
@@ -186,7 +235,8 @@ Em introdução manual, o **comprimento L é obrigatório** no separador
 **2 · Geometria** (não há ficheiro de onde o ler).
 
 O cálculo demora tipicamente **4 a 5 segundos por motor**. A janela não
-bloqueia: o botão fica desativado e a consola vai enchendo.
+bloqueia: o botão fica desativado, a barra de estado mostra o tempo decorrido e
+o *Registo* vai enchendo.
 
 ---
 
@@ -229,7 +279,7 @@ kg ar/kg para HFO. A premissa por trás da segunda linha é que **todo o ar
 admitido sai no escape**.
 
 O botão **«Calcular caudal de escape»** (separador 1, introdução manual) mostra
-os caudais na consola e preenche a coluna, para os poder conferir em vez de os
+os caudais no *Registo* e preenche a coluna, para os poder conferir em vez de os
 aceitar às cegas.
 
 > **Cuidado com colunas de consumo tabelado.** No dataset de exemplo, a coluna
@@ -350,7 +400,32 @@ consumo de ureia; deixe-a desligada para reproduzir o comportamento do MATLAB.
 
 ## 7. Ler os resultados
 
-### Na consola
+### No painel de resultados
+
+| separador | mostra |
+|---|---|
+| **Resumo** | O **volume crítico** em destaque, com a área frontal e o comprimento; ao lado, o NOx e o slip do ciclo com o respetivo alvo, a conversão e o consumo de ureia — tudo avaliado nesse volume. Por baixo, o α de cada modo. |
+| **Modos** | Uma linha por modo do ciclo, no volume crítico: α, X_NO, NO [g/kWh], slip, ureia, τ e a situação do modo. Os alvos por modo estão na legenda da tabela. |
+| **Varrimento** | Uma linha por volume avaliado, do maior para o menor. O volume crítico está realçado a amarelo; os volumes inadmissíveis estão a vermelho. |
+| **Gráfico** | NOx do ciclo, slip do ciclo (escala logarítmica), α por modo e ureia, contra o volume, com os alvos e o volume crítico marcados. Redesenha-se à medida do painel. Precisa do `matplotlib`. |
+| **Registo** | A consola: o texto integral do cálculo (ver abaixo), com os botões **Gravar registo…** e **Limpar**. |
+
+Com **vários resultados** — «todos os motores», ou vários pares CPSI / parede —
+o *Resumo* ganha uma tabela que os põe lado a lado. **Escolher uma linha dessa
+tabela** muda o resultado mostrado nos mosaicos e nos separadores *Modos*,
+*Varrimento* e *Gráfico*. Na comparação de substratos, o par com o menor volume
+crítico de cada motor fica assinalado com ★ e é o que aparece escolhido à
+partida; os pares impossíveis ficam a vermelho, com o motivo na coluna
+«Observação».
+
+Se **não houver volume admissível**, o mosaico do volume crítico fica a
+vermelho com «Sem solução» e o que fazer (ver §9), e o separador *Modos* mostra
+o maior volume avaliado — é aí que se vê qual o modo em situação 4.
+
+Quando chega texto novo ao *Registo* e este não está à vista, o separador fica
+marcado com um ponto («Registo •»).
+
+### No registo (consola)
 
 Uma linha por volume avaliado:
 
@@ -417,13 +492,19 @@ nesse volume. Pares impossíveis aparecem na tabela com o motivo na coluna
 
 ## 8. Guardar e repetir um estudo
 
-- **Gravar cenário…** escreve um `.json` com **todos** os inputs do formulário.
-  Em introdução manual, os dados do motor vão **dentro** do ficheiro, que
-  passa a correr sozinho, sem CSV nenhum.
-- **Carregar cenário…** repõe o formulário a partir desse `.json`.
-- **Gravar registo…** guarda o conteúdo da consola num `.txt`.
+Na barra lateral, por baixo dos separadores (grupo **Cenário**):
+
+- **Gravar cenário…** (`Ctrl+S`) escreve um `.json` com **todos** os inputs do
+  formulário. Em introdução manual, os dados do motor vão **dentro** do
+  ficheiro, que passa a correr sozinho, sem CSV nenhum.
+- **Carregar cenário…** (`Ctrl+O`) repõe o formulário a partir desse `.json`.
 - **Repor omissões** volta aos valores por omissão sem perder o ficheiro nem o
   motor escolhidos.
+
+No separador *Registo* do painel de resultados:
+
+- **Gravar registo…** guarda o conteúdo da consola num `.txt`.
+- **Limpar** esvazia a consola.
 
 O mesmo `.json` corre sem interface:
 
@@ -440,9 +521,9 @@ print(batch.summary)
 
 ## 9. Quando não há volume admissível
 
-Se a consola disser *«nenhum volume admissível no intervalo varrido»*, a
-primeira geometria avaliada já falhou. Motivos habituais, por ordem de
-probabilidade:
+Se o *Resumo* mostrar **«Sem solução»** (e o *Registo* disser *«nenhum volume
+admissível no intervalo varrido»*), a primeira geometria avaliada já falhou.
+Motivos habituais, por ordem de probabilidade:
 
 1. **Volume máximo pequeno de mais** — aumente o «Volume máximo» no separador
    do Varrimento. É o motivo mais comum.
@@ -453,8 +534,8 @@ probabilidade:
 4. **Janela de α estreita** — alargue `α mínimo`/`α máximo`, ou reduza o passo
    de α.
 
-O ficheiro `_modos.csv` diz qual o modo em situação 4 e porquê (NOx acima do
-alvo *e* slip acima do alvo ao mesmo α).
+O separador *Modos* (e o ficheiro `_modos.csv`) diz qual o modo em situação 4 e
+porquê (NOx acima do alvo *e* slip acima do alvo ao mesmo α).
 
 ---
 
@@ -462,12 +543,12 @@ alvo *e* slip acima do alvo ao mesmo α).
 
 | mensagem | causa | o que fazer |
 |---|---|---|
-| «Escolha o ficheiro de inputs (CSV)» | Campo vazio | Carregue no `...` |
+| «Escolha o ficheiro de inputs (CSV)» | Campo vazio | Carregue em «Procurar…» |
 | «Não consegui ler o ficheiro» | Separador ou decimal diferentes | O leitor espera `;` e vírgula decimal. Para outro formato, use a biblioteca com `DatasetFormat` |
 | «Coluna "..." não existe no ficheiro» | Cabeçalhos com outros nomes | Renomeie as colunas, ou use `ColumnMap` na biblioteca |
 | «Geometria da célula inválida» | Parede grossa de mais para o CPSI | Baixe a espessura ou o CPSI |
 | «"α mínimo" tem de ser menor que "α máximo"» | Limites trocados | Corrija |
-| Campo a **vermelho claro** | Valor não numérico ou fora dos limites | O texto do erro diz qual é o campo e o limite |
+| Campo a **vermelho claro** | Valor não numérico ou fora dos limites | A aplicação abre o separador desse campo e põe lá o cursor; o texto do erro diz qual é o campo e o limite |
 | «Nenhuma linha do motor "X"» | Etiqueta não existe no ficheiro | Escolha da lista |
 
 ---

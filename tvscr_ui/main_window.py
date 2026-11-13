@@ -6,8 +6,13 @@ A interface NAO calcula nada: recolhe os inputs, monta um
 :meth:`~tvscr.RunScenario.run_one`. Todo o modelo esta no pacote ``tvscr``.
 
 As oito seccoes de inputs sao paginas escondidas, mostradas uma de cada vez
-pelos separadores no topo. Os dados do motor podem vir de um ficheiro CSV ou
-ser introduzidos a mao numa tabela.
+pelos separadores da barra lateral, agrupados em tres blocos (dados do
+projeto, modelo do catalisador, calculo). Os dados do motor podem vir de um
+ficheiro CSV ou ser introduzidos a mao numa tabela.
+
+Por baixo do formulario, separado por um divisor arrastavel, fica o painel de
+resultados (:mod:`tvscr_ui.results`): resumo com o volume critico em destaque,
+tabela do varrimento, grafico e registo (a consola).
 
 O varrimento corre numa thread separada; a consola e alimentada por uma fila,
 para a janela nunca bloquear.
@@ -19,6 +24,7 @@ import contextlib
 import json
 import queue
 import threading
+import time
 import traceback
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -31,9 +37,11 @@ from tvscr import (AlphaLoopOptions, EmissionTargets, EngineDataset,
                    SolverOptions, SubstrateGeometry, VolumeSweepOptions)
 
 from .paged import Column, EditableTable, ModeTable, PagedForm, RadioGroup
+from .results import ResultsPanel
 from .theme import C, F, init_fonts
-from .widgets import (CheckField, ChoiceField, Console, FieldError, FloatField,
-                      IntField, PathField, Section, TextField, Tooltip)
+from .widgets import (CheckField, ChoiceField, FieldError, FloatField,
+                      IntField, PathField, Section, TextField, Tooltip,
+                      flat_button, ghost_button)
 
 __all__ = ["MainWindow", "launch"]
 
@@ -45,6 +53,23 @@ LOGO = Path(__file__).with_name("assets") / "tecnoveritas.png"
 
 FUELS = ["HFO", "MDO", "MGO", "LSFO"]
 TIERS = ["III", "II", "I"]
+
+RUN_LABEL = "▶  Correr dimensionamento"
+SHORTCUTS_HINT = ("F5  correr   ·   Ctrl+O  carregar cenário   ·   "
+                  "Ctrl+S  gravar cenário   ·   Ctrl+PgUp / PgDn  mudar de separador")
+NO_DATASET_INFO = ("Nenhum ficheiro carregado. Escolha o CSV em «Procurar…»: os "
+                   "motores que ele trouxer aparecem na lista «Motor».")
+
+SIDEBAR_WIDTH = 232          # largura minima da barra lateral [px]
+CARD_GAP = 12                # espaco entre cartoes [px]
+# Altura [px] que o ajuste automatico do divisor reserva ao painel de
+# resultados: pouca enquanto esta vazio (a prioridade e o formulario), mais
+# quando ha um calculo a correr ou resultados para ler.
+RESULTS_IDLE_HEIGHT = 170
+RESULTS_MIN_HEIGHT = 270
+RESULTS_START_HEIGHT = 330   # altura dos resultados quando a janela abre
+FORM_START_HEIGHT = 540      # a pagina mais alta (tabela manual de 4 modos)
+SMALL_SCREEN_HEIGHT = 900    # abaixo disto [px de ecra] a janela abre maximizada
 
 #: Colunas da tabela de varrimento de substratos.
 SUBSTRATE_COLUMNS = [
@@ -69,22 +94,22 @@ MODE_COLUMNS = [
                    "input: é o que o modelo calcula."),
     Column("sfoc_g_per_kWh", "SFOC", "g/kWh", 9, required=False,
            tooltip="Consumo específico. Com λ, dá o caudal de escape."),
-    Column("lambda_", "λ", "-", 8, required=False,
+    Column("lambda_", "λ", "-", 7, required=False,
            tooltip="Excesso de ar. Com o SFOC, dá o caudal de escape."),
-    Column("exhaust_mass_flow_kgs", "Caudal esc.", "kg/s", 10, required=False,
+    Column("exhaust_mass_flow_kgs", "Caudal esc.", "kg/s", 13, required=False,
            tooltip="Caudal mássico de escape. Se o preencher em TODOS os modos, "
                    "é usado directamente e SFOC + λ passam a ser dispensáveis."),
 ]
 
 
 class MainWindow(tk.Tk):
-    """Janela unica: separadores de inputs em cima, consola em baixo."""
+    """Janela unica: separadores a esquerda, inputs em cima, resultados em baixo."""
 
     def __init__(self) -> None:
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1210x880")
-        self.minsize(1000, 640)
+        self.geometry("1280x860")
+        self.minsize(1040, 640)
         self.configure(bg=C.BG)
 
         init_fonts(self)
@@ -92,17 +117,20 @@ class MainWindow(tk.Tk):
 
         self._queue: "queue.Queue[Tuple[str, object]]" = queue.Queue()
         self._running = False
+        self._run_started = 0.0
         self._dataset: Optional[EngineDataset] = None
         self._logo_image: Optional[tk.PhotoImage] = None
+        self._sash_moved = False          # o utilizador arrastou o divisor?
 
         self._build_header()
-        self._build_pages()
-        self._build_actions()
-        self._build_console()
+        self._build_statusbar()
+        self._build_body()
+        self._bind_shortcuts()
 
         self.console.write(APP_TITLE, "titulo")
         self.console.write("Escolha a origem dos dados do motor, percorra os "
                            "separadores e prima «Correr dimensionamento».")
+        self.results.mark_log_read()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._update_source_state()
         self._fit_to_screen()
@@ -118,7 +146,7 @@ class MainWindow(tk.Tk):
                         fieldbackground=C.FIELD_BG, background=C.FIELD_BG,
                         foreground=C.FIELD_FG, arrowcolor=C.BTN_FG,
                         bordercolor=C.BORDER, lightcolor=C.FIELD_BG,
-                        darkcolor=C.FIELD_BG, padding=2)
+                        darkcolor=C.FIELD_BG, padding=3)
         style.map("TVSCR.TCombobox",
                   fieldbackground=[("readonly", C.FIELD_BG),
                                    ("disabled", C.FIELD_DISABLED)],
@@ -128,19 +156,55 @@ class MainWindow(tk.Tk):
         self.option_add("*TCombobox*Listbox.foreground", C.FIELD_FG)
         self.option_add("*TCombobox*Listbox.selectBackground", C.BG_PANEL)
         self.option_add("*TCombobox*Listbox.selectForeground", C.TEXT)
+        self.option_add("*TCombobox*Listbox.font", F.BASE)
+
+        # --- tabelas de resultados ---
+        style.configure("TVSCR.Treeview", background=C.SHEET_BG,
+                        fieldbackground=C.SHEET_BG, foreground=C.SHEET_FG,
+                        font=F.BASE, borderwidth=0, relief="flat",
+                        rowheight=F.BASE.metrics("linespace") + 8)
+        style.configure("TVSCR.Treeview.Heading", background=C.HEAD_BG,
+                        foreground=C.BTN_FG, font=F.BOLD, relief="flat",
+                        padding=(6, 4))
+        # So o estado "selected" no mapa: assim as cores das etiquetas (linha do
+        # volume critico, linhas inadmissiveis) nao sao tapadas pelo tema.
+        style.map("TVSCR.Treeview",
+                  background=[("selected", C.BG_PANEL)],
+                  foreground=[("selected", C.TEXT)])
+        style.map("TVSCR.Treeview.Heading", background=[("active", C.HEAD_BG)])
+
+        # --- barras de rolamento: claras na folha, escuras sobre verde ---
+        for prefix, thumb, trough, arrow, hover in (
+                ("TVSCR", C.SCROLL, C.SCROLL_TROUGH, C.BTN_FG, C.BORDER),
+                ("TVSCRDark", C.BORDER, C.BG_HEADER, C.TEXT, C.NAV_ACTIVE_BG)):
+            for orient in ("Vertical", "Horizontal"):
+                name = f"{prefix}.{orient}.TScrollbar"
+                style.configure(name, background=thumb, troughcolor=trough,
+                                bordercolor=trough, lightcolor=thumb,
+                                darkcolor=thumb, arrowcolor=arrow,
+                                relief="flat", arrowsize=13)
+                style.map(name, background=[("disabled", trough),
+                                            ("active", hover)])
+
+        style.configure("TVSCR.Horizontal.TProgressbar", troughcolor=C.BG,
+                        background=C.ACCENT, bordercolor=C.BG_HEADER,
+                        lightcolor=C.ACCENT, darkcolor=C.ACCENT)
 
     def _button(self, parent, text, command, primary: bool = False, **kw):
-        colours = dict(bg=C.RUN_BG, fg=C.RUN_FG, activebackground=C.RUN_ACTIVE) \
-            if primary else dict(bg=C.BTN_BG, fg=C.BTN_FG, activebackground=C.BTN_ACTIVE)
-        return tk.Button(parent, text=text, command=command, relief="flat",
-                         font=F.BOLD if primary else F.BASE, cursor="hand2",
-                         padx=14, pady=6, bd=0, **colours, **kw)
+        if not primary:
+            return flat_button(parent, text, command, **kw)
+        button = tk.Button(parent, text=text, command=command, relief="flat",
+                           font=F.BOLD, cursor="hand2", padx=14, pady=9, bd=0,
+                           bg=C.RUN_BG, fg=C.RUN_FG, highlightthickness=0,
+                           activebackground=C.RUN_ACTIVE,
+                           activeforeground=C.RUN_FG, **kw)
+        button.bind("<Enter>", lambda _e: str(button.cget("state")) != "disabled"
+                    and button.configure(bg=C.RUN_ACTIVE), add="+")
+        button.bind("<Leave>", lambda _e: button.configure(bg=C.RUN_BG), add="+")
+        return button
 
     def _small_button(self, parent, text, command, **kw):
-        return tk.Button(parent, text=text, command=command, relief="flat",
-                         font=F.SMALL, cursor="hand2", padx=9, pady=3, bd=0,
-                         bg=C.BTN_BG, fg=C.BTN_FG, activebackground=C.BTN_ACTIVE,
-                         **kw)
+        return flat_button(parent, text, command, small=True, **kw)
 
     # ------------------------------------------------------------------ #
     #  Cabecalho, com o logotipo a direita
@@ -154,30 +218,85 @@ class MainWindow(tk.Tk):
             try:
                 self._logo_image = tk.PhotoImage(file=str(LOGO))
                 tk.Label(bar, image=self._logo_image, bg=C.BG_HEADER,
-                         bd=0).pack(side="right", padx=16, pady=10)
+                         bd=0).pack(side="right", padx=16, pady=8)
             except tk.TclError:                    # imagem ilegivel: segue sem ela
                 self._logo_image = None
 
         text = tk.Frame(bar, bg=C.BG_HEADER)
         text.pack(side="left", fill="x", expand=True)
         tk.Label(text, text=APP_TITLE, bg=C.BG_HEADER, fg=C.TITLE,
-                 font=F.TITLE, anchor="w").pack(fill="x", padx=16, pady=(14, 0))
+                 font=F.TITLE, anchor="w").pack(fill="x", padx=16, pady=(12, 0))
         tk.Label(text, text=APP_SUBTITLE, bg=C.BG_HEADER, fg=C.TEXT_DIM,
-                 font=F.SUBTITLE, anchor="w").pack(fill="x", padx=16, pady=(2, 14))
+                 font=F.SUBTITLE, anchor="w").pack(fill="x", padx=16, pady=(2, 12))
+
+    # ------------------------------------------------------------------ #
+    #  Barra de estado (fundo da janela)
+    # ------------------------------------------------------------------ #
+    def _build_statusbar(self) -> None:
+        bar = tk.Frame(self, bg=C.BG_HEADER)
+        self._status_bar = bar
+        bar.pack(side="bottom", fill="x")
+        self.progress = ttk.Progressbar(bar, mode="indeterminate", length=150,
+                                        style="TVSCR.Horizontal.TProgressbar")
+        self.status = tk.Label(bar, text="Pronto", bg=C.BG_HEADER, fg=C.TEXT,
+                               font=F.SMALL, anchor="w")
+        self.status.pack(side="left", padx=(16, 10), pady=5)
+        tk.Label(bar, text=SHORTCUTS_HINT, bg=C.BG_HEADER, fg=C.NAV_GROUP,
+                 font=F.SMALL, anchor="e").pack(side="right", padx=16)
+
+    def _set_status(self, text: str) -> None:
+        self.status.configure(text=text)
+
+    # ------------------------------------------------------------------ #
+    #  Corpo: barra lateral | (formulario / resultados)
+    # ------------------------------------------------------------------ #
+    def _build_body(self) -> None:
+        body = tk.Frame(self, bg=C.BG)
+        body.pack(fill="both", expand=True)
+
+        # Largura medida no tipo de letra, para o botao de correr caber seja
+        # qual for a fonte ou a escala do ecra.
+        self._sidebar = tk.Frame(
+            body, bg=C.NAV_BG,
+            width=max(SIDEBAR_WIDTH, F.BOLD.measure(RUN_LABEL) + 46))
+        self._sidebar.pack(side="left", fill="y")
+        self._sidebar.pack_propagate(False)
+
+        # Divisor arrastavel entre o formulario e os resultados.
+        paned = tk.PanedWindow(body, orient="vertical", bg=C.BG, bd=0,
+                               sashwidth=10, sashrelief="flat",
+                               opaqueresize=True,
+                               sashcursor="sb_v_double_arrow")
+        paned.pack(side="left", fill="both", expand=True, padx=(14, 12),
+                   pady=(12, 8))
+        self._paned = paned
+        paned.bind("<B1-Motion>", self._on_sash_drag, add="+")
+        paned.bind("<Double-Button-1>", self._on_sash_reset, add="+")
+        paned.bind("<Configure>", lambda _e: self._sync_form_height(), add="+")
+
+        self._build_pages(paned)
+        self._build_results(paned)
+        self._build_sidebar_actions()
 
     # ------------------------------------------------------------------ #
     #  Paginas de inputs
     # ------------------------------------------------------------------ #
-    def _build_pages(self) -> None:
-        holder = tk.Frame(self, bg=C.BG)
-        # fill="x" e nao "both": o formulario fica com a altura do seu conteudo
-        # e a folga sobrante vai toda para a consola.
-        holder.pack(fill="x", padx=12, pady=(10, 0))
+    def _build_pages(self, paned: tk.PanedWindow) -> None:
+        holder = tk.Frame(paned, bg=C.BG)
+        paned.add(holder, minsize=150, stretch="never")
+        holder.rowconfigure(0, weight=1)
+        holder.columnconfigure(0, weight=1)
+        # A coluna da barra de rolamento existe sempre, mesmo com a barra
+        # escondida: assim a largura do formulario nao muda quando ela aparece.
+        holder.columnconfigure(1, minsize=16)
 
-        canvas = tk.Canvas(holder, bg=C.BG, highlightthickness=0)
-        vbar = tk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        canvas = tk.Canvas(holder, bg=C.BG, highlightthickness=0, height=420)
+        vbar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview,
+                             style="TVSCRDark.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=vbar.set)
-        canvas.pack(side="left", fill="both", expand=True)
+        canvas.grid(row=0, column=0, sticky="nsew")
+        vbar.grid(row=0, column=1, sticky="ns")
+        vbar.grid_remove()
         self._form_canvas = canvas
         self._form_scrollbar = vbar        # so aparece se o conteudo nao couber
 
@@ -186,49 +305,101 @@ class MainWindow(tk.Tk):
         window = canvas.create_window((0, 0), window=inner, anchor="nw")
         inner.bind("<Configure>", self._sync_form_height)
         canvas.bind("<Configure>",
-                    lambda e: canvas.itemconfigure(window, width=e.width))
+                    lambda e: (canvas.itemconfigure(window, width=e.width),
+                               self._update_form_scrollbar()))
         # A roda do rato so mexe o formulario se o ponteiro estiver SOBRE ele.
         # Sem esta verificacao, rolar na consola mexia tambem o formulario.
         self.bind_all("<MouseWheel>", self._on_mousewheel, add="+")
+        # No X11 a roda chega como botoes 4 e 5.
+        self.bind_all("<Button-4>", lambda e: self._on_wheel_button(e, 120),
+                      add="+")
+        self.bind_all("<Button-5>", lambda e: self._on_wheel_button(e, -120),
+                      add="+")
 
-        self.form = PagedForm(inner)
+        self.form = PagedForm(inner, nav_parent=self._sidebar)
+        self.form.tabs.pack(fill="x", pady=(12, 0))
         self.form.pack(fill="both", expand=True)
 
+        self.form.add_group("DADOS DO PROJETO")
         self._build_engine_page(self.form.add_page(
             "motor", "1 · Dados do motor",
             "Ficheiro CSV ou introdução manual dos modos do ciclo"))
         self._build_geometry_page(self.form.add_page(
-            "geometria", "2 · Geometria", "Substrato e monolito instalado"))
+            "geometria", "2 · Geometria", "Substrato e monolito a instalar"))
         self._build_targets_page(self.form.add_page(
             "alvos", "3 · Alvos", "Limites de NOx e de NH₃ slip"))
+        self.form.add_group("MODELO DO CATALISADOR")
         self._build_kinetics_page(self.form.add_page(
-            "cinetica", "4 · Cinética", "Parâmetros do modelo de Tronconi"))
+            "cinetica", "4 · Cinética",
+            "Parâmetros do modelo de Tronconi, envelhecimento e fouling"))
         self._build_tuning_page(self.form.add_page(
             "calibracao", "5 · Calibração", "Multiplicadores sobre a cinética"))
+        self.form.add_group("CÁLCULO")
         self._build_sweep_page(self.form.add_page(
             "varrimento", "6 · Varrimento", "Malha de volumes e refinamento"))
         self._build_alpha_page(self.form.add_page(
             "alpha", "7 · Loop de α", "Procura do doseamento admissível"))
         self._build_output_page(self.form.add_page(
             "saida", "8 · Numérico e saída", "Malha do solver e ficheiros"))
+        self.form.on_change(lambda _key: self._form_canvas.yview_moveto(0))
 
     def _sync_form_height(self, _event=None) -> None:
-        """Da ao formulario a altura do seu conteudo, ate um tecto razoavel.
+        """Ajusta o divisor ao conteudo do formulario, ate um tecto razoavel.
 
         Assim nao sobra area verde vazia por baixo da pagina, e a barra de
         rolamento so aparece quando o conteudo nao cabe mesmo (uma tabela
-        manual com muitas linhas, por exemplo).
+        manual com muitas linhas, por exemplo). Deixa de o fazer assim que o
+        utilizador arrasta o divisor: a partir dai manda ele.
         """
+        canvas = self._form_canvas
+        canvas.configure(scrollregion=canvas.bbox("all"))
+        if not self._sash_moved:
+            self._place_sash()
+        self._update_form_scrollbar()
+
+    def _place_sash(self) -> None:
+        """Poe o divisor logo abaixo do formulario, deixando espaco aos resultados."""
+        total = self._paned.winfo_height()
+        if total <= 1:                              # janela ainda por desenhar
+            return
+        # A pagina MAIS ALTA, e nao a que esta a vista: o divisor nao salta
+        # ao trocar de separador.
+        needed = self.form.tallest_height() + 2
+        busy = self._running or self.results.has_results
+        limit = max(int(total * 0.45),
+                    total - (RESULTS_MIN_HEIGHT if busy else RESULTS_IDLE_HEIGHT))
+        with contextlib.suppress(tk.TclError):
+            self._paned.sash_place(0, 0, max(150, min(needed, limit)))
+
+    def _on_sash_drag(self, _event=None) -> None:
+        self._sash_moved = True
+
+    def _on_sash_reset(self, _event=None) -> None:
+        """Duplo clique no divisor: volta ao ajuste automatico."""
+        self._sash_moved = False
+        self._sync_form_height()
+
+    def _form_overflows(self) -> bool:
+        return (self._form_inner.winfo_reqheight()
+                > self._form_canvas.winfo_height() + 1)
+
+    def _update_form_scrollbar(self) -> None:
+        if self._form_overflows():
+            self._form_scrollbar.grid()
+        else:
+            self._form_scrollbar.grid_remove()
+            self._form_canvas.yview_moveto(0)
+
+    def _scroll_into_view(self, widget) -> None:
+        """Rola o formulario o necessario para ``widget`` ficar a vista."""
         canvas, inner = self._form_canvas, self._form_inner
-        needed = inner.winfo_reqheight()
-        cap = int(self.winfo_screenheight() * 0.52)
-        canvas.configure(height=min(needed, cap),
-                         scrollregion=canvas.bbox("all"))
-        if needed > cap:
-            if not self._form_scrollbar.winfo_ismapped():
-                self._form_scrollbar.pack(side="right", fill="y")
-        elif self._form_scrollbar.winfo_ismapped():
-            self._form_scrollbar.pack_forget()
+        if not self._form_overflows():
+            return
+        top = widget.winfo_rooty() - canvas.winfo_rooty()
+        if 0 <= top and top + widget.winfo_height() <= canvas.winfo_height():
+            return                                  # ja esta a vista
+        offset = widget.winfo_rooty() - inner.winfo_rooty()
+        canvas.yview_moveto(max(0.0, (offset - 60) / max(1, inner.winfo_height())))
 
     def _is_inside_form(self, widget) -> bool:
         """``True`` se ``widget`` pertencer a arvore do formulario."""
@@ -248,31 +419,74 @@ class MainWindow(tk.Tk):
         """
         if not self._is_inside_form(self.winfo_containing(event.x_root, event.y_root)):
             return None                            # deixa o widget tratar
-        self._form_canvas.yview_scroll(int(-event.delta / 120), "units")
+        if self._form_overflows():
+            self._form_canvas.yview_scroll(int(-event.delta / 120), "units")
         return "break"
 
+    def _on_wheel_button(self, event, delta: int):
+        event.delta = delta
+        return self._on_mousewheel(event)
+
     @staticmethod
-    def _columns(page: tk.Frame, count: int, weights=None) -> List[tk.Frame]:
-        """Divide uma pagina em colunas."""
-        frames = []
-        weights = weights or [1] * count
+    def _columns(page: tk.Frame, count: int, weights=None,
+                 stack_below: int = 0) -> List[tk.Frame]:
+        """Divide uma pagina em colunas.
+
+        Sem ``weights``, as colunas tem todas a mesma largura. Com
+        ``stack_below``, passam a ficar umas por baixo das outras quando a
+        pagina e mais estreita do que esse valor [px], em vez de se cortarem.
+        Cada cartao deve ser posto na sua coluna com ``_fill``, para os cartoes
+        da mesma linha ficarem com a mesma altura.
+        """
+        frames = [tk.Frame(page, bg=C.BG) for _ in range(count)]
         for i in range(count):
-            frame = tk.Frame(page, bg=C.BG_PANEL)
-            frame.grid(row=0, column=i, sticky="nsew", padx=(0 if i == 0 else 14, 0))
-            page.columnconfigure(i, weight=weights[i])
-            frames.append(frame)
-        page.rowconfigure(0, weight=1)
+            if weights:
+                page.columnconfigure(i, weight=weights[i])
+            else:
+                page.columnconfigure(i, weight=1, uniform="colunas")
+
+        state = {"stacked": None}
+
+        def arrange(stacked: bool) -> None:
+            if state["stacked"] == stacked:
+                return
+            state["stacked"] = stacked
+            for i, frame in enumerate(frames):
+                if stacked:
+                    frame.grid(row=i, column=0, columnspan=count, sticky="new",
+                               padx=0, pady=(0 if i == 0 else CARD_GAP, 0))
+                else:
+                    frame.grid(row=0, column=i, columnspan=1, sticky="nsew",
+                               padx=(0 if i == 0 else CARD_GAP, 0), pady=0)
+
+        arrange(False)
+        if stack_below:
+            page.bind("<Configure>",
+                      lambda e: e.widget is page and arrange(e.width < stack_below),
+                      add="+")
         return frames
+
+    @staticmethod
+    def _fill(card: Section) -> Section:
+        """Poe o cartao a ocupar a coluna toda (largura e altura)."""
+        card.pack(fill="both", expand=True)
+        return card
 
     # -- 1. dados do motor ----------------------------------------------- #
     def _build_engine_page(self, page: tk.Frame) -> None:
-        left, right = self._columns(page, 2, weights=[4, 1])
+        # Grelha propria (e nao _columns): a esquerda, a origem dos dados e o
+        # cartao que dela depende; a direita, a toda a altura, o que e comum as
+        # duas origens; por baixo, a toda a largura, a tabela dos modos.
+        page.columnconfigure(0, weight=1)
+        page.rowconfigure(1, weight=1)
 
         # --- origem dos dados ---
-        chooser = tk.Frame(left, bg=C.BG_PANEL)
-        chooser.pack(fill="x", pady=(0, 6))
+        origin = Section(page, "")
+        origin.grid(row=0, column=0, sticky="ew")
+        chooser = tk.Frame(origin.body, bg=C.BG_PANEL)
+        chooser.grid(row=origin.next_row(), column=0, columnspan=5, sticky="w")
         tk.Label(chooser, text="ORIGEM DOS DADOS", bg=C.BG_PANEL, fg=C.TITLE,
-                 font=F.BOLD).pack(side="left", padx=(0, 14))
+                 font=F.BOLD).pack(side="left", padx=(0, 18))
         self.source = tk.StringVar(value="csv")
         self.source_radio = RadioGroup(
             chooser, self.source,
@@ -282,23 +496,24 @@ class MainWindow(tk.Tk):
         self.source.trace_add("write", lambda *_: self._update_source_state())
 
         # --- area que muda conforme a origem ---
-        area = tk.Frame(left, bg=C.BG_PANEL)
-        area.pack(fill="both", expand=True)
+        area = tk.Frame(page, bg=C.BG)
+        area.grid(row=1, column=0, sticky="nsew", pady=(CARD_GAP, 0))
         area.rowconfigure(0, weight=1)
         area.columnconfigure(0, weight=1)
 
-        self._csv_frame = tk.Frame(area, bg=C.BG_PANEL)
+        self._csv_frame = tk.Frame(area, bg=C.BG)
         self._csv_frame.grid(row=0, column=0, sticky="nsew")
-        self._manual_frame = tk.Frame(area, bg=C.BG_PANEL)
+        self._manual_frame = tk.Frame(area, bg=C.BG)
         self._manual_frame.grid(row=0, column=0, sticky="nsew")
 
         self._build_csv_source(self._csv_frame)
         self._build_manual_source(self._manual_frame)
 
         # --- comum as duas origens ---
-        common = Section(right, "MOTOR E COMBUSTÍVEL", flat=True, note_wrap=260,
+        common = Section(page, "MOTOR E COMBUSTÍVEL", note_wrap=260,
                          note="Aplica-se seja qual for a origem dos dados.")
-        common.pack(fill="x")
+        common.grid(row=0, column=1, rowspan=2, sticky="nsew",
+                    padx=(CARD_GAP, 0))
         self.f_fuel = ChoiceField(common, "Combustível", FUELS, "HFO",
                                   tooltip="Define o AFR estequiométrico usado para "
                                           "converter SFOC + λ em caudal de escape.")
@@ -312,12 +527,22 @@ class MainWindow(tk.Tk):
                     "como o MATLAB. Coincide com a regra completa entre 130 e "
                     "2000 rpm.")
 
+        # --- tabela dos modos (so em introducao manual), a toda a largura ---
+        self._modes_card = Section(
+            page, "MODOS DO CICLO DE ENSAIO", note_wrap=760,
+            note="Um modo por linha. Linhas em branco são ignoradas. Para o "
+                 "caudal de escape, preencha SFOC + λ ou, em alternativa, a "
+                 "coluna «Caudal esc.» em todos os modos.")
+        self._modes_card.grid(row=2, column=0, columnspan=2, sticky="ew",
+                              pady=(CARD_GAP, 0))
+        self._build_mode_table(self._modes_card)
+
     def _build_csv_source(self, parent: tk.Frame) -> None:
-        s = Section(parent, "FICHEIRO DE INPUTS", flat=True, note_wrap=520,
+        s = Section(parent, "FICHEIRO DE INPUTS", note_wrap=520,
                     note="Uma linha por modo do ciclo e por motor. As condições de "
                          "operação — carga, peso, potência, temperatura, NO à "
                          "entrada, SFOC e λ — vêm todas daqui.")
-        s.pack(fill="x")
+        s.pack(fill="both", expand=True)
         self.f_dataset = PathField(
             s, "Ficheiro (CSV)", mode="open",
             on_pick=lambda _p: self._load_dataset(),
@@ -332,12 +557,18 @@ class MainWindow(tk.Tk):
         self.f_all_engines.var.trace_add("write",
                                          lambda *_: self._update_engine_state())
 
+        # O que o ficheiro / motor escolhido traz, logo por baixo da escolha.
+        info = s.add_block()
+        self.engine_info = tk.Label(info, text=NO_DATASET_INFO, bg=C.BG_PANEL,
+                                    fg=C.TEXT_DIM, font=F.SMALL, anchor="w",
+                                    justify="left", wraplength=560)
+        self.engine_info.pack(fill="x")
+        info.bind("<Configure>", lambda e: self.engine_info.configure(
+            wraplength=max(200, e.width - 4)))
+
     def _build_manual_source(self, parent: tk.Frame) -> None:
-        s = Section(parent, "INTRODUÇÃO MANUAL", flat=True, note_wrap=760,
-                    note="Um modo por linha. Linhas em branco são ignoradas. Para o "
-                         "caudal de escape, preencha SFOC + λ ou, em alternativa, a "
-                         "coluna «Caudal esc.» em todos os modos.")
-        s.pack(fill="x")
+        s = Section(parent, "IDENTIFICAÇÃO DO MOTOR")
+        s.pack(fill="both", expand=True)
         self.f_manual_name = TextField(s, "Nome do motor", "DG1", width=16)
         self.f_manual_rpm = FloatField(s, "Rotação nominal", 513.0, "rpm",
                                        minimum=1.0,
@@ -346,13 +577,13 @@ class MainWindow(tk.Tk):
                                          minimum=0.0, allow_empty=True,
                                          tooltip="Opcional: só entra no relatório.")
 
-        table_holder = tk.Frame(parent, bg=C.BG_PANEL)
-        table_holder.pack(fill="both", expand=True, pady=(6, 0))
-        self.mode_table = ModeTable(table_holder, MODE_COLUMNS, initial_rows=4)
+    def _build_mode_table(self, card: Section) -> None:
+        block = card.add_block()
+        self.mode_table = ModeTable(block, MODE_COLUMNS, initial_rows=4)
         self.mode_table.pack(anchor="w")
 
-        buttons = tk.Frame(parent, bg=C.BG_PANEL)
-        buttons.pack(fill="x", pady=(8, 0))
+        buttons = tk.Frame(block, bg=C.BG_PANEL)
+        buttons.pack(fill="x", pady=(9, 0))
         self._small_button(buttons, "+ Adicionar modo",
                            self.mode_table.add_row).pack(side="left")
         self._small_button(buttons, "− Remover último",
@@ -383,6 +614,7 @@ class MainWindow(tk.Tk):
         try:
             rows = self.mode_table.rows()
         except FieldError as exc:
+            self._reveal_error(exc)
             messagebox.showerror("Input inválido", str(exc))
             return
 
@@ -410,15 +642,18 @@ class MainWindow(tk.Tk):
                            f"AFR estequiométrico = {flow.afr_stoich:.3f}):", "ok")
         for line in flow.describe().splitlines()[1:]:
             self.console.write(line)
+        # Os caudais de combustivel, ar e escape ficam no registo: mostra-lo.
+        self.results.select("registo")
+        self._set_status("Caudal de escape calculado: detalhe por modo no registo.")
 
     # -- 2. geometria ----------------------------------------------------- #
     def _build_geometry_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "SUBSTRATO", flat=True, note_wrap=420,
+        s = Section(left, "SUBSTRATO", note_wrap=420,
                     note="Escolha de projeto: não vem do ficheiro de inputs. "
                          "Pode comparar vários pares num só cálculo.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_sweep_substrate = CheckField(
             s, "Comparar vários pares CPSI / parede", False,
             tooltip="Corre o varrimento em volume uma vez por par e põe os "
@@ -427,8 +662,7 @@ class MainWindow(tk.Tk):
         self.f_sweep_substrate.var.trace_add(
             "write", lambda *_: self._update_substrate_state())
 
-        area = tk.Frame(left, bg=C.BG_PANEL)
-        area.pack(fill="x", pady=(4, 0))
+        area = s.add_block()
         area.rowconfigure(0, weight=1)
         area.columnconfigure(0, weight=1)
         self._single_substrate = tk.Frame(area, bg=C.BG_PANEL)
@@ -457,7 +691,7 @@ class MainWindow(tk.Tk):
             {"cpsi": 100, "wall_mm": 0.25},
         ])
         buttons = tk.Frame(self._multi_substrate, bg=C.BG_PANEL)
-        buttons.pack(fill="x", pady=(8, 0))
+        buttons.pack(fill="x", pady=(9, 0))
         self._small_button(buttons, "+ Adicionar par",
                            self.substrate_table.add_row).pack(side="left")
         self._small_button(buttons, "− Remover último",
@@ -466,15 +700,16 @@ class MainWindow(tk.Tk):
         self._small_button(buttons, "Limpar tabela",
                            lambda: self.substrate_table.clear(3)).pack(side="left")
 
-        g = Section(right, "MONOLITO", flat=True, note_wrap=400,
+        g = Section(right, "MONOLITO", note_wrap=400,
                     note="O comprimento fica FIXO durante o varrimento e a área "
                          "frontal sai do volume: A = V / L. É o volume que o "
                          "cálculo procura, não a área.")
-        g.pack(fill="x")
+        self._fill(g)
         self.f_length = FloatField(g, "Comprimento L", 1.2, "m", minimum=1e-6,
                                    tooltip="Comprimento do monolito a instalar. "
                                            "Fica fixo; o varrimento faz variar a "
                                            "área frontal (A = V / L).")
+        self._update_substrate_state()
 
     def _update_substrate_state(self) -> None:
         """Mostra a tabela de pares ou os dois campos únicos."""
@@ -487,18 +722,18 @@ class MainWindow(tk.Tk):
     def _build_targets_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "NOx", flat=True, note_wrap=380,
+        s = Section(left, "NOx", note_wrap=380,
                     note="Frações do limite MARPOL calculado para a rotação do "
                          "motor. O ciclo ponderado é mais apertado que cada modo.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_cyc_frac = FloatField(s, "NOx do ciclo (fração)", 0.60, "-",
                                      minimum=0.0, maximum=1.0)
         self.f_mode_frac = FloatField(s, "NOx por modo (fração)", 0.80, "-",
                                       minimum=0.0, maximum=1.0)
 
-        t = Section(right, "NH₃ SLIP", flat=True, note_wrap=380,
+        t = Section(right, "NH₃ SLIP", note_wrap=380,
                     note="Amoníaco não reagido à saída do reator.")
-        t.pack(fill="x")
+        self._fill(t)
         self.f_cyc_slip = FloatField(t, "Slip do ciclo", 10.0, "ppm", minimum=0.0)
         self.f_mode_slip = FloatField(t, "Slip por modo", 20.0, "ppm", minimum=0.0)
 
@@ -506,10 +741,10 @@ class MainWindow(tk.Tk):
     def _build_kinetics_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "REAÇÃO", flat=True, note_wrap=380,
+        s = Section(left, "REAÇÃO", note_wrap=380,
                     note="Valores por omissão: Tabela 2 de Tronconi 1998 "
                          "(catalisador 1). Energias de ativação em cal/mol.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_k0ads = FloatField(s, "k0 adsorção NH₃", 8.5e6, "-", minimum=0.0)
         self.f_Eads = FloatField(s, "E adsorção NH₃", 9.0e3, "cal/mol")
         self.f_k0NO = FloatField(s, "k0 redução NO", 2.5e10, "-", minimum=0.0)
@@ -518,11 +753,11 @@ class MainWindow(tk.Tk):
         self.f_E0d = FloatField(s, "E dessorção (θ=0)", 2.6e4, "cal/mol")
         self.f_beta = FloatField(s, "β (Temkin)", 0.32, "-")
 
-        t = Section(right, "TRANSPORTE E ESTADO DO CATALISADOR", flat=True,
+        t = Section(right, "TRANSPORTE E ESTADO DO CATALISADOR",
                     note_wrap=380,
                     note="Envelhecimento e fouling são o que separa um reator que "
                          "cumpre no primeiro dia de um que cumpre ao fim da vida.")
-        t.pack(fill="x")
+        self._fill(t)
         self.f_KK0 = FloatField(t, "Envelhecimento KK0", 0.80, "-", minimum=1e-6,
                                 tooltip="k0NO efetivo = k0NO · KK0². "
                                         "1 = catalisador novo; 0.8 = fim de vida.")
@@ -545,11 +780,11 @@ class MainWindow(tk.Tk):
     # -- 5. calibracao ---------------------------------------------------- #
     def _build_tuning_page(self, page: tk.Frame) -> None:
         left, _right = self._columns(page, 2)
-        s = Section(left, "MULTIPLICADORES DE CALIBRAÇÃO", flat=True, note_wrap=380,
+        s = Section(left, "MULTIPLICADORES DE CALIBRAÇÃO", note_wrap=380,
                     note="Aplicados por cima da cinética já calculada, para ajustar "
                          "o modelo a um catalisador concreto sem mexer nos "
                          "parâmetros físicos. Tudo a 1 reproduz a referência.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_t_kNO = FloatField(s, "× kNO", 1.0, "-", minimum=0.0)
         self.f_t_kads = FloatField(s, "× kads", 1.0, "-", minimum=0.0)
         self.f_t_Deff = FloatField(s, "× Deff", 1.0, "-", minimum=0.0)
@@ -559,11 +794,11 @@ class MainWindow(tk.Tk):
     def _build_sweep_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "MALHA DE VOLUMES", flat=True, note_wrap=380,
+        s = Section(left, "MALHA DE VOLUMES", note_wrap=380,
                     note="Desce em volume até ao primeiro volume inadmissível — "
                          "esse é o volume crítico. L fica fixo e a área varia "
                          "(A = V / L).")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_v_max = FloatField(s, "Volume máximo", 3.50, "m³", minimum=1e-6,
                                   tooltip="Maior volume a considerar; o varrimento "
                                           "começa aqui e desce. Se o maior volume "
@@ -573,11 +808,11 @@ class MainWindow(tk.Tk):
                                    minimum=1e-6)
         self.f_v_min = FloatField(s, "Volume mínimo", 0.20, "m³", minimum=1e-6)
 
-        t = Section(right, "REFINAMENTO", flat=True, note_wrap=380,
+        t = Section(right, "REFINAMENTO", note_wrap=380,
                     note="Bisseção em V entre o último volume admissível e o "
                          "primeiro que falhou, para afinar o volume crítico para "
                          "além da resolução do passo.")
-        t.pack(fill="x")
+        self._fill(t)
         self.f_refine = CheckField(t, "Refinar por bisseção em V", True)
         self.f_refine_tol = FloatField(t, "Tolerância do refinamento", 0.02, "m³",
                                        minimum=1e-9)
@@ -586,18 +821,18 @@ class MainWindow(tk.Tk):
     def _build_alpha_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "PROCURA DE α", flat=True, note_wrap=380,
+        s = Section(left, "PROCURA DE α", note_wrap=380,
                     note="Procura, por modo, o α que cumpre NO_out e slip nos dois "
                          "níveis. Bracketing + bisseção geométrica contra "
                          "oscilação.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_alpha0 = FloatField(s, "α de arranque", 0.80, "-", minimum=0.0)
         self.f_dalpha = FloatField(s, "Passo de α", 0.02, "-", minimum=1e-9)
         self.f_alpha_min = FloatField(s, "α mínimo", 0.30, "-", minimum=0.0)
         self.f_alpha_max = FloatField(s, "α máximo", 1.20, "-", minimum=0.0)
 
-        t = Section(right, "CONVERGÊNCIA", flat=True, note_wrap=380)
-        t.pack(fill="x")
+        t = Section(right, "CONVERGÊNCIA", note_wrap=380)
+        self._fill(t)
         self.f_max_iter = IntField(t, "Máximo de iterações", 200, "-", minimum=1)
         self.f_bracket_tol = FloatField(t, "Tolerância de bracketing", 1e-4, "-",
                                         minimum=0.0)
@@ -611,76 +846,113 @@ class MainWindow(tk.Tk):
     def _build_output_page(self, page: tk.Frame) -> None:
         left, right = self._columns(page, 2)
 
-        s = Section(left, "SOLVER", flat=True, note_wrap=380,
+        s = Section(left, "SOLVER", note_wrap=380,
                     note="Malha axial do modelo 1-D. 120 é o valor validado; "
                          "alterar muda o resultado ao nível da discretização.")
-        s.pack(fill="x")
+        self._fill(s)
         self.f_nodes = IntField(s, "Nós axiais", 120, "-", minimum=10)
 
-        t = Section(right, "FICHEIROS", flat=True, note_wrap=380,
+        t = Section(right, "FICHEIROS", note_wrap=380,
                     note="Sem pasta indicada, nada é gravado em disco — os "
-                         "resultados ficam só na consola.")
-        t.pack(fill="x")
+                         "resultados ficam só no painel de resultados.")
+        self._fill(t)
         self.f_outdir = PathField(t, "Pasta de resultados", mode="dir")
         self.f_save_csv = CheckField(t, "Gravar CSV", True)
         self.f_save_png = CheckField(t, "Gravar figuras (PNG)", True)
 
     # ------------------------------------------------------------------ #
-    #  Barra de accoes e consola
+    #  Resultados e accoes
     # ------------------------------------------------------------------ #
-    def _build_actions(self) -> None:
-        bar = tk.Frame(self, bg=C.BG)
-        self._actions_bar = bar
-        bar.pack(fill="x", padx=12, pady=(5, 6))
+    def _build_results(self, paned: tk.PanedWindow) -> None:
+        self.results = ResultsPanel(paned, on_save_log=self._on_save_log)
+        paned.add(self.results, minsize=170, stretch="always")
+        self.console = self.results.console
 
-        self.btn_run = self._button(bar, "▶  Correr dimensionamento",
-                                    self._on_run, primary=True)
-        self.btn_run.pack(side="left")
-        self._button(bar, "Repor omissões", self._on_reset).pack(side="left",
-                                                                 padx=(8, 0))
-        self._button(bar, "Carregar cenário…", self._on_load_scenario).pack(
-            side="left", padx=(8, 0))
-        self._button(bar, "Gravar cenário…", self._on_save_scenario).pack(
-            side="left", padx=(8, 0))
-        self._button(bar, "Gravar registo…", self._on_save_log).pack(
-            side="left", padx=(8, 0))
-        self._button(bar, "Limpar consola",
-                     lambda: self.console.clear()).pack(side="left", padx=(8, 0))
+    def _build_sidebar_actions(self) -> None:
+        """Accoes sobre o cenario e, sempre visivel, o botao de correr."""
+        scenario = tk.Frame(self._sidebar, bg=C.NAV_BG)
+        scenario.pack(fill="x", pady=(14, 0))
+        tk.Label(scenario, text="CENÁRIO", bg=C.NAV_BG, fg=C.NAV_GROUP,
+                 font=F.SMALL_BOLD, anchor="w", padx=16).pack(fill="x",
+                                                              pady=(0, 3))
+        for text, command, tip in (
+                ("Carregar cenário…", self._on_load_scenario,
+                 "Repõe o formulário a partir de um .json gravado (Ctrl+O)."),
+                ("Gravar cenário…", self._on_save_scenario,
+                 "Escreve um .json com todos os inputs do formulário (Ctrl+S)."),
+                ("Repor omissões", self._on_reset,
+                 "Volta aos valores por omissão, sem perder o ficheiro nem o "
+                 "motor escolhidos.")):
+            button = ghost_button(scenario, text, command, anchor="w")
+            button.configure(bg=C.NAV_BG, padx=16)
+            button.bind("<Leave>", lambda _e, b=button: b.configure(bg=C.NAV_BG),
+                        add="+")
+            button.pack(fill="x")
+            Tooltip(button, tip, delay_ms=700)
 
-        self.status = tk.Label(bar, text="pronto", bg=C.BG, fg=C.TEXT_DIM,
-                               font=F.BASE, anchor="e")
-        self.status.pack(side="right")
+        run = tk.Frame(self._sidebar, bg=C.NAV_BG)
+        self._actions_bar = run
+        run.pack(side="bottom", fill="x", padx=14, pady=(0, 14))
+        self.btn_run = self._button(run, RUN_LABEL, self._on_run, primary=True)
+        self.btn_run.pack(fill="x")
+        Tooltip(self.btn_run, "Corre o varrimento em volume com os inputs de "
+                              "todos os separadores (F5).", delay_ms=700)
 
-    def _build_console(self) -> None:
-        self.console = Console(self, height=12)
-        # expand=True: toda a folga da janela vai para a consola.
-        self.console.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+    def _bind_shortcuts(self) -> None:
+        def call(action):
+            def handler(_event=None):
+                action()
+                return "break"
+            return handler
+
+        self.bind("<F5>", call(self._on_run))
+        self.bind("<Control-Return>", call(self._on_run))
+        for key in ("o", "O"):                       # com e sem Caps Lock
+            self.bind(f"<Control-{key}>", call(self._on_load_scenario))
+        for key in ("s", "S"):
+            self.bind(f"<Control-{key}>", call(self._on_save_scenario))
+        self.bind("<Control-Next>", call(self.form.select_next))
+        self.bind("<Control-Prior>", call(self.form.select_previous))
 
     def _fit_to_screen(self) -> None:
         """Ajusta a janela ao conteudo, sem passar dos limites do ecra."""
         self.update_idletasks()
-        chrome = 65
-        # Alvo: consola com 20 linhas. Se nao couber, o clamp ao ecra encarrega-se.
-        console_target = F.MONO.metrics("linespace") * 20 + 24
+        chrome = 20 + 14                 # margens verticais do divisor + folga
         needed = (self._header_bar.winfo_reqheight()
-                  + self._form_canvas.winfo_reqheight()
-                  + self._actions_bar.winfo_reqheight()
-                  + console_target + chrome)
+                  + self._status_bar.winfo_reqheight()
+                  + max(self.form.tallest_height(), FORM_START_HEIGHT)
+                  + RESULTS_START_HEIGHT + chrome)
         height = min(needed, int(self.winfo_screenheight() * 0.90))
-        width = min(1210, int(self.winfo_screenwidth() * 0.95))
+        width = min(1280, int(self.winfo_screenwidth() * 0.95))
         x = max(0, (self.winfo_screenwidth() - width) // 2)
         y = max(0, (self.winfo_screenheight() - height) // 3)
         self.geometry(f"{width}x{height}+{x}+{y}")
+        if self.winfo_screenheight() < SMALL_SCREEN_HEIGHT:
+            # Ecra baixo (portatil): a janela abre maximizada, para o formulario
+            # e os resultados caberem com o minimo de rolamento.
+            with contextlib.suppress(tk.TclError):
+                self.state("zoomed")
+        self.update_idletasks()
+        self._sync_form_height()
 
     # ------------------------------------------------------------------ #
     #  Origem dos dados
     # ------------------------------------------------------------------ #
     def _update_source_state(self) -> None:
-        """Mostra a area da origem escolhida e esconde a outra."""
+        """Mostra a area da origem escolhida e esconde a outra.
+
+        Esconde mesmo (``grid_remove``), em vez de so tapar: assim a pagina
+        fica com a altura do que esta a vista, e a tabela dos modos -- que so
+        existe em introducao manual -- nao ocupa espaco no modo CSV.
+        """
         if self.source.get() == "manual":
-            self._manual_frame.tkraise()
+            self._csv_frame.grid_remove()
+            self._manual_frame.grid()
+            self._modes_card.grid()
         else:
-            self._csv_frame.tkraise()
+            self._manual_frame.grid_remove()
+            self._modes_card.grid_remove()
+            self._csv_frame.grid()
         self._update_engine_state()
 
     def _load_dataset(self) -> None:
@@ -693,6 +965,8 @@ class MainWindow(tk.Tk):
         except Exception as exc:
             self._dataset = None
             self.f_engine.set_options([""])
+            self.engine_info.configure(
+                text="Não foi possível ler o ficheiro escolhido.")
             messagebox.showerror("Não consegui ler o ficheiro", str(exc))
             self.console.write(f"ERRO ao ler {path}: {exc}", "erro")
             return
@@ -701,6 +975,7 @@ class MainWindow(tk.Tk):
         self.console.write(f"Ficheiro carregado: {path}")
         self.console.write(f"Motores encontrados ({len(engines)}): "
                            f"{', '.join(engines)}", "ok")
+        self._set_status(f"Ficheiro carregado: {len(engines)} motores.")
         self._on_engine_change()
 
     def _on_engine_change(self) -> None:
@@ -716,6 +991,8 @@ class MainWindow(tk.Tk):
             case = self._dataset.build_case(engine)
         except Exception as exc:
             self.console.write(f"Aviso ao ler o motor {engine}: {exc}", "erro")
+            self.engine_info.configure(
+                text=f"Não foi possível ler o motor {engine}: {exc}")
             return
         self.f_length.set(f"{case.geometry.length_m:g}")
         self.console.write(
@@ -727,12 +1004,28 @@ class MainWindow(tk.Tk):
             f"{case.mass_flow_kgs.max():.3f} kg/s · "
             f"NO à entrada: {case.NO_in_ppm.min():.0f} a "
             f"{case.NO_in_ppm.max():.0f} ppm")
+        self.engine_info.configure(
+            text=f"{engine}: {case.n_modes} modos  ·  limite NOx = "
+                 f"{case.nox_limit_gkWh:.4f} g/kWh  ·  caudal de escape "
+                 f"{case.mass_flow_kgs.min():.3f} a "
+                 f"{case.mass_flow_kgs.max():.3f} kg/s  ·  NO à entrada "
+                 f"{case.NO_in_ppm.min():.0f} a {case.NO_in_ppm.max():.0f} ppm"
+                 f"  ·  L sugerido pelo ficheiro = "
+                 f"{case.geometry.length_m:.3f} m")
 
     def _update_engine_state(self) -> None:
         """Com «todos os motores», a escolha do motor fica inerte."""
         all_engines = self.f_all_engines.value() and self.source.get() == "csv"
         self.f_engine.combo.configure(
             state="disabled" if all_engines else "readonly")
+        if self._dataset is None:
+            self.engine_info.configure(text=NO_DATASET_INFO)
+        elif all_engines:
+            engines = self._dataset.engines()
+            self.engine_info.configure(
+                text=f"Serão corridos os {len(engines)} motores do ficheiro: "
+                     f"{', '.join(engines)}. A geometria e a malha de volumes "
+                     f"dos outros separadores aplicam-se a todos.")
 
     def _copy_from_dataset(self) -> None:
         """Preenche a tabela manual com o motor escolhido no ficheiro CSV."""
@@ -764,10 +1057,45 @@ class MainWindow(tk.Tk):
         self.f_length.set(f"{case.geometry.length_m:g}")
         self.console.write(f"Tabela preenchida com {case.n_modes} modos "
                            f"do motor {case.name}.", "ok")
+        self._set_status(f"Tabela preenchida com {case.n_modes} modos do motor "
+                         f"{case.name}.")
 
     # ------------------------------------------------------------------ #
     #  Formulario  <->  RunScenario
     # ------------------------------------------------------------------ #
+    def _collect_or_report(self) -> Optional[Tuple[RunScenario, Optional[str]]]:
+        """Le o formulario; se houver um valor invalido, leva o utilizador a ele.
+
+        Devolve ``None`` quando o formulario nao esta em condicoes de correr.
+        """
+        self.form.clear_flags()
+        try:
+            return self._collect()
+        except FieldError as exc:
+            self._reveal_error(exc)
+            messagebox.showerror("Input inválido", str(exc))
+        except Exception as exc:
+            messagebox.showerror("Erro", f"{type(exc).__name__}: {exc}")
+        return None
+
+    def _reveal_error(self, exc: FieldError) -> None:
+        """Abre o separador do campo invalido, da-lhe o foco e assinala-o.
+
+        Sem isto a mensagem dizia o nome do parametro, mas era o utilizador que
+        tinha de descobrir em que separador ele estava.
+        """
+        widget = getattr(exc, "widget", None)
+        key = self.form.key_of(widget) if widget is not None else None
+        if key is not None:
+            self.form.select(key)
+            self.update_idletasks()
+            self._scroll_into_view(widget)
+            with contextlib.suppress(tk.TclError):
+                widget.focus_set()
+        key = key or self.form.current
+        self.form.flag(key)
+        self._set_status("Input inválido: corrija o campo assinalado a vermelho.")
+
     def _collect(self) -> Tuple[RunScenario, Optional[str]]:
         """Le o formulario e devolve o cenario + o motor unico (ou ``None``)."""
         manual = self.source.get() == "manual"
@@ -1048,14 +1376,15 @@ class MainWindow(tk.Tk):
             self.f_engine.set(engine)
             self._on_engine_change()
         self._update_source_state()
+        self.form.clear_flags()
         self.console.write("Parâmetros repostos nos valores por omissão.", "ok")
+        self._set_status("Parâmetros repostos nos valores por omissão.")
 
     def _on_save_scenario(self) -> None:
-        try:
-            scenario, _ = self._collect()
-        except FieldError as exc:
-            messagebox.showerror("Input inválido", str(exc))
+        collected = self._collect_or_report()
+        if collected is None:
             return
+        scenario, _ = collected
         path = filedialog.asksaveasfilename(
             title="Gravar cenário", defaultextension=".json",
             filetypes=(("JSON", "*.json"), ("Todos", "*.*")))
@@ -1066,6 +1395,7 @@ class MainWindow(tk.Tk):
         Path(path).write_text(json.dumps(data, indent=2, default=str),
                               encoding="utf-8")
         self.console.write(f"Cenário gravado: {path}", "ok")
+        self._set_status(f"Cenário gravado: {path}")
 
     def _on_load_scenario(self) -> None:
         path = filedialog.askopenfilename(
@@ -1080,7 +1410,9 @@ class MainWindow(tk.Tk):
             messagebox.showerror("Cenário inválido", str(exc))
             return
         self._apply(scenario)
+        self.form.clear_flags()
         self.console.write(f"Cenário carregado: {path}", "ok")
+        self._set_status(f"Cenário carregado: {path}")
 
     def _on_save_log(self) -> None:
         path = filedialog.asksaveasfilename(
@@ -1090,6 +1422,7 @@ class MainWindow(tk.Tk):
             return
         Path(path).write_text(self.console.dump(), encoding="utf-8")
         self.console.write(f"Registo gravado: {path}", "ok")
+        self._set_status(f"Registo gravado: {path}")
 
     # ------------------------------------------------------------------ #
     #  Corrida
@@ -1097,14 +1430,10 @@ class MainWindow(tk.Tk):
     def _on_run(self) -> None:
         if self._running:
             return
-        try:
-            scenario, engine = self._collect()
-        except FieldError as exc:
-            messagebox.showerror("Input inválido", str(exc))
+        collected = self._collect_or_report()
+        if collected is None:
             return
-        except Exception as exc:
-            messagebox.showerror("Erro", f"{type(exc).__name__}: {exc}")
-            return
+        scenario, engine = collected
 
         outdir = self.f_outdir.value()
         save_csv = self.f_save_csv.value()
@@ -1121,6 +1450,11 @@ class MainWindow(tk.Tk):
         self._set_running(True)
         self.console.clear()
         self.console.write(APP_TITLE, "titulo")
+        # Durante o calculo ve-se o registo a encher; no fim passa-se ao resumo.
+        self.results.clear(title="A calcular…", steps=(
+            "O progresso de cada volume aparece no separador «Registo».",))
+        self.results.select("registo")
+        self._sync_form_height()         # da espaco ao painel de resultados
         args = (scenario, engine, outdir if (save_csv or save_png) else None,
                 save_csv, save_png)
         threading.Thread(target=self._worker, args=args, daemon=True).start()
@@ -1208,17 +1542,23 @@ class MainWindow(tk.Tk):
                 if kind == "log":
                     self.console.write(str(payload))
                 elif kind == "done":
+                    elapsed = time.monotonic() - self._run_started
                     self._on_finished(payload)
-                    self._set_running(False)
+                    self._set_running(False,
+                                      status=f"Concluído em {elapsed:.1f} s.")
                     return
                 elif kind == "error":
                     self.console.write("\nERRO durante o cálculo:", "erro")
                     for line in str(payload).rstrip().splitlines():
                         self.console.write(line, "erro")
+                    self.results.clear(title="O cálculo falhou", steps=(
+                        "A mensagem de erro está no separador «Registo».",))
+                    self.results.select("registo")
+                    self._set_running(False, status="O cálculo falhou: ver o "
+                                                    "registo.")
                     messagebox.showerror(
                         "Erro durante o cálculo",
                         str(payload).rstrip().splitlines()[-1])
-                    self._set_running(False)
                     return
         except queue.Empty:
             pass
@@ -1240,6 +1580,14 @@ class MainWindow(tk.Tk):
                 self.console.write(f"  {path}")
         self.console.write("")
         self.console.write("Concluído.", "ok")
+
+        # Os mesmos numeros, agora de forma estruturada no painel de resultados.
+        if payload["kind"] == "substratos":
+            self.results.show_substrates(payload["sweep"])
+        else:
+            self.results.show_volume(payload["results"])
+        self.results.select("resumo")
+        self._sync_form_height()
 
     def _report_volume_sweep(self, results) -> None:
         self.console.write("RESULTADO", "titulo")
@@ -1289,15 +1637,31 @@ class MainWindow(tk.Tk):
                     f"  {row.engine} · CPSI {s.cpsi:g} / "
                     f"{s.wall_thickness_m * 1e3:.2f} mm: {row.reason}", "erro")
 
-    def _set_running(self, running: bool) -> None:
+    def _set_running(self, running: bool, status: str = "Pronto") -> None:
         self._running = running
         self.btn_run.configure(state="disabled" if running else "normal",
-                               text="A correr…" if running
-                               else "▶  Correr dimensionamento")
-        self.status.configure(
-            text="a correr — pode demorar alguns segundos por motor" if running
-            else "pronto")
+                               text="A correr…" if running else RUN_LABEL,
+                               bg=C.RUN_BG)
         self.configure(cursor="watch" if running else "")
+        if running:
+            self._run_started = time.monotonic()
+            self.progress.pack(side="left", padx=(16, 0), pady=5,
+                               before=self.status)
+            self.progress.start(14)
+            self._tick()
+        else:
+            self.progress.stop()
+            self.progress.pack_forget()
+            self._set_status(status)
+
+    def _tick(self) -> None:
+        """Actualiza o tempo decorrido na barra de estado enquanto corre."""
+        if not self._running:
+            return
+        elapsed = time.monotonic() - self._run_started
+        self._set_status(f"A calcular… {elapsed:.0f} s  (tipicamente 4 a 5 s "
+                         f"por motor e por substrato)")
+        self.after(250, self._tick)
 
     def _on_close(self) -> None:
         if self._running and not messagebox.askyesno(
