@@ -569,7 +569,7 @@ a biblioteca (§16).
 | Massa molar do escape (doseamento) | 0.02896 kg/mol | Consumo de ureia |
 | NH₃ por mole de ureia | 2 | Consumo de ureia |
 | Massa molar do escape (NOx específico) | 29.0 g/mol | Conversão de ppm em g/kWh |
-| Massa molar do NO | 30.01 g/mol | Conversão de ppm em g/kWh |
+| Massa molar do NOx (como NO₂) | 46.01 g/mol | Conversão de ppm em g/kWh |
 | Constante dos gases | 1.987 cal/(mol·K) e 8.314 J/(mol·K) | Arrhenius e densidade do gás |
 | Tolerâncias do Newton por nó | Ver `SolverOptions` | Solver |
 | Nomes das colunas e formato do CSV | Ver §12 | Leitura do ficheiro |
@@ -812,11 +812,13 @@ Por modo:
 ```
 X_NO  = 100 · (C_NO,entrada − C_NO,saída) / C_NO,entrada         conversão  [%]
 slip  = C_NH3,saída                                              [ppm]
-NO    = NO_saída[ppm] · 3600 · m_exh · M_NO / (P · M_esc · 1000) [g/kWh]
+NO    = NO_saída[ppm] · 3600 · m_exh · M_NOx / (P · M_esc · 1000) [g/kWh]
 ```
 
-com `m_exh` em kg/s, `P` a potência de travão em kW, `M_NO = 30.01 g/mol` e
-`M_esc = 29.0 g/mol`.
+com `m_exh` em kg/s, `P` a potência de travão em kW, `M_NOx = 46.01 g/mol` e
+`M_esc = 29.0 g/mol`. A massa molar é a do **NO₂**: o NOx específico exprime-se
+como NO₂ equivalente, pela convenção do Código Técnico NOx da MARPOL, embora a
+espécie que o modelo resolve seja o NO.
 
 No ciclo, cada grandeza é a média ponderada pelos pesos `w` dos modos:
 
@@ -1137,7 +1139,8 @@ em estudo.
 - **Decomposição completa da ureia.** Admite-se que a solução evapora e que a
   ureia se converte integralmente em NH₃ antes do catalisador.
 - **Sem reações secundárias.** A oxidação do NH₃ é desprezada, e o NOx é
-  tratado como NO.
+  tratado como NO na reação (a conversão para g/kWh usa a massa molar do NO₂,
+  §11.5).
 - **Canal único representativo.** Todos os canais veem o mesmo caudal e o mesmo
   α. Com má distribuição de caudal ou de NH₃ à entrada, o modelo **sobrestima a
   conversão e subestima o slip**: canais com excesso de NH₃ não compensam os
