@@ -161,7 +161,7 @@ Se faltar alguma dependência, o programa diz qual e não abre a janela.
 │ CÁLCULO         │ [Resumo][Modos][Varrimento][Gráfico][Registo]        │
 │  6 · Varrimento │ ┌──────────────┐┌────────┐┌────────┐┌──────┐┌──────┐ │ painel de
 │  7 · Loop de α  │ │VOLUME CRÍTICO││ NOx    ││ slip   ││ X_NO ││ureia │ │ resultados
-│  8 · Numérico   │ │ 1.540 m³     ││ + alvo ││ + alvo ││      ││      │ │
+│  8 · Numérico   │ │ 1.613 m³     ││ + alvo ││ + alvo ││      ││      │ │
 │ CENÁRIO         │ └──────────────┘└────────┘└────────┘└──────┘└──────┘ │
 │  Carregar…      │                                                      │
 │  Gravar…        │                                                      │
@@ -605,12 +605,13 @@ marcado com um ponto («Registo •»).
 
 ### No registo (consola)
 
-Uma linha por volume avaliado:
+Uma linha por volume avaliado. Os números deste exemplo são os do ficheiro
+de exemplo da §12, com os valores por omissão do formulário:
 
 ```
    V[m3]    A[m2]    sit NOx_c[g/kWh] slip_c[ppm]   XNO_c[%]  urea[L/h]   n_it
-   1.640    1.367      1       1.5331       6.176      79.49      35.32      1
-   1.440    1.200      4       1.6801       9.852      77.57      34.15      5
+   1.700    1.417      1       1.5050       6.085      87.29      39.77      6
+   1.500    1.250      4       2.4807       8.963      79.25      36.06      1
 ```
 
 A coluna **`sit`** é a situação em que o loop de α fechou:
@@ -628,13 +629,15 @@ No fim, o resumo — tudo avaliado **no volume crítico**, que é o reator a
 instalar:
 
 ```
-  DG1: VOLUME CRÍTICO = 1.540 m³ (A = 1.283 m², L = 1.20 m)
-      nesse volume: NOx = 1.5417 g/kWh · slip = 7.753 ppm · X_NO = 79.42 % · ureia = 34.91 L/h
-      α por modo: 11%=0.816  24%=0.816  50%=0.816  73%=0.758
+  DG1: VOLUME CRÍTICO = 1.613 m³ (A = 1.344 m², L = 1.20 m)
+      nesse volume: NOx = 1.4035 g/kWh · slip = 7.633 ppm · X_NO = 88.12 % · ureia = 39.98 L/h
+      α por modo: 11%=0.849  24%=0.901  50%=0.901  73%=0.871
 ```
 
-Repare que, no volume crítico, o NOx e o slip ficam **encostados aos alvos** —
-é essa a definição de crítico. Se quiser margem, instale um volume maior: o
+Repare que, no volume crítico, pelo menos um dos quatro alvos fica **encostado
+ao limite** — é essa a definição de crítico. Pode ser um alvo do ciclo ou o de
+um modo: neste exemplo o NOx e o slip do ciclo ainda têm folga, e é um modo que
+fecha o varrimento (vê-se no separador *Modos*). Se quiser margem, instale um volume maior: o
 varrimento mostra, linha a linha, quanto é que cada metro cúbico extra compra.
 
 ### Nos ficheiros
@@ -1058,7 +1061,7 @@ antigas do programa.
 
 ## 15. Reproduzir os resultados do MATLAB
 
-Para obter exatamente os números dos scripts originais:
+Para obter os números dos scripts originais, os campos do formulário são:
 
 | campo | valor |
 |---|---|
@@ -1074,9 +1077,14 @@ Para obter exatamente os números dos scripts originais:
 | Comprimento L | `1.2` m |
 | Nós axiais | `120` |
 
-Com estes valores, DG1 dá `V_crítico = 1.540 m³`, igual ao MATLAB até ao
-arredondamento de máquina. A tabela de paridade dos cinco motores está no
-[README](README.md).
+Falta ainda a massa molar do NOx: o MATLAB usava a do NO (30.01 g/mol) e a
+aplicação usa, por omissão, a do NO₂ (46.01 g/mol), como exige o Código Técnico
+NOx. Esse valor não está no formulário, pelo que a paridade **só se obtém pela
+biblioteca** (§16), com `GasConstants(M_NOx_g_mol=30.01)`.
+
+Com esses valores, DG1 dá `V_crítico = 1.540 m³`, igual ao MATLAB até ao
+arredondamento de máquina. Com a massa molar do NO₂ o volume crítico sai maior.
+A tabela de paridade dos cinco motores está no [README](README.md).
 
 ---
 

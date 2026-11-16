@@ -41,7 +41,7 @@ class GasConstants:
     R_cal: float = 1.987      # constante dos gases [cal/(mol.K)] -- energias em cal/mol
     R_J: float = 8.314        # constante dos gases [J/(mol.K)]   -- densidade do gas
     M_exhaust_g_mol: float = 29.0     # massa molar media do escape [g/mol] (NOx especifico)
-    M_NO_g_mol: float = 30.01         # massa molar do NO           [g/mol]
+    M_NOx_g_mol: float = 46.01        # massa molar do NOx, como NO2 [g/mol] (MARPOL NTC)
 
 
 @dataclass(frozen=True)

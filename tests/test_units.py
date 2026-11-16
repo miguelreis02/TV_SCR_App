@@ -75,6 +75,16 @@ def test_specific_nox_roundtrip():
     assert nox_ppm_from_specific(g, mdot, P) == pytest.approx(ppm, rel=1e-12)
 
 
+def test_specific_nox_is_expressed_as_NO2():
+    """NOx especifico em g/kWh como NO2 (NOx Technical Code), nao como NO."""
+    from tvscr.kinetics import GasConstants
+    assert GasConstants().M_NOx_g_mol == pytest.approx(46.01)
+    ppm, mdot, P = 200.0, 3.5, 1400.0
+    ratio = specific_nox_gkwh(ppm, mdot, P) / specific_nox_gkwh(
+        ppm, mdot, P, M_NOx_g_mol=30.01)
+    assert ratio == pytest.approx(46.01 / 30.01, rel=1e-12)
+
+
 def test_stoich_afr_ordering():
     # mais hidrogenio -> mais ar por kg de combustivel
     assert stoich_afr("MGO") > stoich_afr("MDO") > stoich_afr("HFO")
@@ -239,6 +249,15 @@ def test_scenario_dict_roundtrip_rebuilds_nested_dataclasses():
     assert back.kinetics.aging_KK0 == pytest.approx(0.85)
     assert back.targets.cycle_slip_ppm == pytest.approx(5.0)
     assert back.to_dict() == data          # idempotente
+
+
+def test_scenario_accepts_old_NOx_molar_mass_name():
+    """Cenarios gravados com ``M_NO_g_mol`` continuam a abrir."""
+    from tvscr import RunScenario
+    back = RunScenario.from_dict(
+        {"kinetics": {"gas": {"M_NO_g_mol": 30.01}}})
+    assert back.kinetics.gas.M_NOx_g_mol == pytest.approx(30.01)
+    assert "M_NO_g_mol" not in back.to_dict()["kinetics"]["gas"]
 
 
 def test_scenario_rejects_unknown_fields():

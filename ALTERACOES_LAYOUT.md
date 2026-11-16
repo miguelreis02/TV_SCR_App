@@ -487,11 +487,12 @@ e a documentação, e fazer uma corrida.
 
 ### 9.8 Notas
 
-- **A documentação descreve o código deste ramo.** O ramo
-  `claude/admiring-dirac-kxvlqy` altera a massa molar usada na conversão de
-  ppm em g/kWh (de NO, 30.01 g/mol, para NO₂, 46.01 g/mol). Se for integrado,
-  a §6 («Parâmetros que não estão no formulário») e a §11.5 do `INSTRUCOES.md`
-  têm de ser atualizadas — os números do exemplo da §7 também mudam.
+- **Massa molar do NOx.** O ramo `claude/admiring-dirac-kxvlqy` foi entretanto
+  integrado: a conversão de ppm em g/kWh usa a massa molar do NO₂
+  (46.01 g/mol). A §6, a §11.5 e a §15 do `INSTRUCOES.md` foram atualizadas, e
+  os exemplos numéricos da §7 foram recalculados com o ficheiro de exemplo da
+  §12. Esse ramo também retirou os `__pycache__` do repositório, pelo que a
+  nota da §8 sobre eles deixou de se aplicar.
 - **«Monolito»** está escrito sem acento na interface e, por coerência com ela,
   na documentação; a grafia correta é «monólito». Corrigir obriga a mexer nos
   rótulos da interface e nas âncoras da documentação ao mesmo tempo.
