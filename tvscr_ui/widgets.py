@@ -1,5 +1,5 @@
 """
-Widgets base da interface: cartoes verdes e campos brancos rotulados.
+Widgets base da interface: cartoes brancos e campos rotulados.
 
 Cada campo sabe ler-se a si proprio (``value()``) e assinalar-se quando o valor
 e invalido, para que a janela principal so tenha de tratar do que e especifico
@@ -84,7 +84,7 @@ def _hover(button: tk.Button, normal: str, hover: str) -> None:
 
 
 def flat_button(parent, text: str, command, small: bool = False, **kw) -> tk.Button:
-    """Botao branco, para accoes secundarias."""
+    """Botao claro, para accoes secundarias."""
     button = tk.Button(parent, text=text, command=command, relief="flat", bd=0,
                        font=F.SMALL if small else F.BASE, cursor="hand2",
                        padx=9 if small else 14, pady=3 if small else 6,
@@ -95,7 +95,7 @@ def flat_button(parent, text: str, command, small: bool = False, **kw) -> tk.But
 
 
 def ghost_button(parent, text: str, command, **kw) -> tk.Button:
-    """Botao discreto sobre verde, para accoes de apoio (navegacao, cenario)."""
+    """Botao discreto sobre o fundo, para accoes de apoio (navegacao, cenario)."""
     button = tk.Button(parent, text=text, command=command, relief="flat", bd=0,
                        font=F.BASE, cursor="hand2", padx=12, pady=5,
                        bg=C.GHOST_BG, fg=C.GHOST_FG,
@@ -215,7 +215,7 @@ class _EntryField(_BaseField):
             section.body, textvariable=self.var, width=width,
             bg=C.FIELD_BG, fg=C.FIELD_FG, font=F.BASE, relief="flat",
             insertbackground=C.FIELD_FG, highlightthickness=1,
-            highlightbackground=C.BORDER, highlightcolor=C.RUN_BG,
+            highlightbackground=C.FIELD_BORDER, highlightcolor=C.FOCUS,
             disabledbackground=C.FIELD_DISABLED)
         self.entry.grid(row=self.row, column=COL_FIELD, sticky="w",
                         pady=self.ROW_PADY, ipady=2)
@@ -333,7 +333,7 @@ class CheckField:
     """
 
     SIZE = 15
-    MARK = "#10281A"
+    MARK = C.NAVY
 
     def __init__(self, section: Section, label: str, default: bool = False,
                  tooltip: str = ""):
@@ -374,7 +374,7 @@ class CheckField:
         box = self.box
         box.delete("all")
         box.create_rectangle(1, 1, self.SIZE - 2, self.SIZE - 2,
-                             fill=C.FIELD_BG, outline=C.BORDER, width=1)
+                             fill=C.FIELD_BG, outline=C.FIELD_BORDER, width=1)
         if self.var.get():
             box.create_line(4, 8, 6, 11, width=2, fill=self.MARK,
                             capstyle="round")
@@ -409,7 +409,7 @@ class PathField(_BaseField):
         self.entry = tk.Entry(holder, textvariable=self.var, bg=C.FIELD_BG,
                               fg=C.FIELD_FG, font=F.BASE, relief="flat",
                               insertbackground=C.FIELD_FG, highlightthickness=1,
-                              highlightbackground=C.BORDER, highlightcolor=C.RUN_BG)
+                              highlightbackground=C.FIELD_BORDER, highlightcolor=C.FOCUS)
         self.entry.grid(row=0, column=0, sticky="ew", ipady=2)
         self.button = flat_button(holder, "Procurar…", self._browse, small=True)
         self.button.grid(row=0, column=1, padx=(6, 0), sticky="ns")
@@ -464,7 +464,7 @@ class Console(tk.Frame):
 
         self.text.tag_configure("erro", foreground=C.LOG_ERR)
         self.text.tag_configure("ok", foreground=C.LOG_OK)
-        self.text.tag_configure("titulo", foreground=C.BTN_FG, font=F.MONO)
+        self.text.tag_configure("titulo", foreground=C.TITLE, font=F.MONO)
         self.text.tag_configure("nota", foreground=C.SHEET_DIM)
 
     def write(self, message: str, tag: str = "") -> None:
@@ -502,9 +502,9 @@ class HelpMark(tk.Canvas):
         super().__init__(parent, width=self.SIZE, height=self.SIZE, bg=bg,
                          highlightthickness=0, bd=0, cursor="question_arrow")
         self.create_oval(1, 1, self.SIZE - 2, self.SIZE - 2,
-                         outline=C.TEXT_DIM, width=1)
+                         outline=C.BLUE, width=1)
         self.create_text(self.SIZE // 2, self.SIZE // 2, text="i",
-                         fill=C.TEXT_DIM, font=F.SMALL_BOLD)
+                         fill=C.BLUE, font=F.SMALL_BOLD)
         Tooltip(self, text, delay_ms=120)
 
 
@@ -537,9 +537,10 @@ class Tooltip:
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 4
         self._window = tk.Toplevel(self.widget)
         self._window.wm_overrideredirect(True)
-        tk.Label(self._window, text=self.text, bg="#FFFDE7", fg="#10281A",
-                 font=F.SMALL, justify="left", wraplength=360, padx=8, pady=6,
-                 relief="solid", bd=1).pack()
+        self._window.configure(bg=C.NAVY)             # contorno do balao
+        tk.Label(self._window, text=self.text, bg=C.TIP_BG, fg=C.TEXT,
+                 font=F.SMALL, justify="left", wraplength=360, padx=8,
+                 pady=6).pack(padx=1, pady=1)
         # Nao deixar o balao sair do ecra (campos junto a margem direita).
         self._window.update_idletasks()
         x = max(0, min(x, self.widget.winfo_screenwidth()

@@ -28,7 +28,11 @@ tk = pytest.importorskip("tkinter")
 
 from tvscr import (KineticParameters, KineticTuning, RunScenario,   # noqa: E402
                    VolumeSweepOptions)
-from tvscr_ui.main_window import MainWindow                       # noqa: E402
+from tvscr_ui.docs import (DOC_PATH, parse_inline, parse_markdown,   # noqa: E402
+                           plain_text, slugify)
+from tvscr_ui.main_window import (MODE_COLUMNS, PAGE_HELP,           # noqa: E402
+                                  SUBSTRATE_COLUMNS, MainWindow)
+from tvscr_ui.theme import C                                         # noqa: E402
 from tvscr_ui.widgets import FieldError, format_number            # noqa: E402
 
 CSV_INPUTS = Path(r"D:\IST\MeMEC\Tese\MATLAB - 1D Model\Modelos\Tronconi1998"
@@ -857,3 +861,327 @@ def test_running_ends_on_the_summary(window, monkeypatch):
     assert window.status.cget("text").startswith("Concluído")
     assert "VOLUME CRÍTICO" in window.console.dump()
     window.results.clear()
+
+
+# --------------------------------------------------------------------- #
+#  Documentacao: leitura do Markdown (nao precisa de janela)
+# --------------------------------------------------------------------- #
+SAMPLE_MD = """# Título do documento
+
+Parágrafo com **negrito**, *itálico*, `código` e uma
+[ligação](#secção-a) na mesma frase.
+
+## Secção A
+
+- primeiro item
+  continua na linha seguinte
+- segundo item
+  1. item numerado, dentro
+
+> Uma citação
+> em duas linhas.
+
+| campo | valor |
+|---|---|
+| `x` | **1** |
+| y | a \\| b |
+
+```
+codigo | com barra
+```
+
+---
+
+## Secção A
+"""
+
+
+def test_markdown_is_split_into_the_expected_blocks():
+    blocks = parse_markdown(SAMPLE_MD)
+    assert [b.kind for b in blocks] == [
+        "heading", "paragraph", "heading", "list", "list", "list", "quote",
+        "table", "code", "rule", "heading"]
+
+    assert (blocks[0].level, blocks[2].level) == (1, 2)
+    assert plain_text(blocks[3].spans) == "primeiro item continua na linha seguinte"
+    assert (blocks[4].level, blocks[5].level) == (0, 1)       # lista dentro de lista
+    assert (blocks[3].marker, blocks[5].marker) == ("•", "1.")
+    assert plain_text(blocks[6].spans) == "Uma citação em duas linhas."
+    assert blocks[8].text == "codigo | com barra"            # a barra nao faz tabela
+
+    table = blocks[7].rows
+    assert [[plain_text(cell) for cell in row] for row in table] == [
+        ["campo", "valor"], ["x", "1"], ["y", "a | b"]]
+    assert table[1][0][0].code and table[1][1][0].bold
+
+
+def test_inline_styles_and_links_are_recognised():
+    spans = parse_markdown(SAMPLE_MD)[1].spans
+    by_text = {s.text: s for s in spans}
+    assert by_text["negrito"].bold and not by_text["negrito"].italic
+    assert by_text["itálico"].italic
+    assert by_text["código"].code
+    assert by_text["ligação"].link == "#secção-a"
+    assert plain_text(spans).startswith("Parágrafo com negrito, itálico, código")
+
+    nested = parse_inline("**[README](README.md)** e `a*b*c`")
+    assert nested[0].bold and nested[0].link == "README.md"
+    assert nested[-1].code and nested[-1].text == "a*b*c"    # sem italico no codigo
+
+
+def test_heading_anchors_follow_the_github_rule():
+    assert slugify("4. O ecrã") == "4-o-ecrã"
+    assert slugify("1 · Dados do motor") == "1--dados-do-motor"
+    assert slugify("14. Ficheiro de cenário (.json)") == "14-ficheiro-de-cenário-json"
+    # titulos repetidos recebem sufixo, como no GitHub
+    anchors = [b.anchor for b in parse_markdown(SAMPLE_MD) if b.kind == "heading"]
+    assert anchors == ["título-do-documento", "secção-a", "secção-a-1"]
+
+
+# --------------------------------------------------------------------- #
+#  Documentacao: o INSTRUCOES.md como documentacao oficial
+# --------------------------------------------------------------------- #
+@pytest.fixture(scope="module")
+def manual():
+    """O texto e os blocos do INSTRUCOES.md."""
+    text = DOC_PATH.read_text(encoding="utf-8")
+    return text, parse_markdown(text)
+
+
+def _all_spans(blocks):
+    for block in blocks:
+        yield from block.spans
+        for row in block.rows:
+            for cell in row:
+                yield from cell
+
+
+def test_every_link_in_the_documentation_leads_somewhere(manual):
+    """Indice e remissoes: nenhuma ligacao pode apontar para o vazio."""
+    _text, blocks = manual
+    anchors = {b.anchor for b in blocks if b.kind == "heading"}
+    links = {s.link for s in _all_spans(blocks) if s.link}
+    assert len(links) > 20                           # o indice esta la
+
+    for link in links:
+        if link.startswith("#"):
+            assert link[1:] in anchors, f"ancora inexistente: {link}"
+        elif "://" not in link:
+            assert (DOC_PATH.parent / link.split("#")[0]).is_file(), link
+
+
+def test_documentation_has_the_reference_sections(manual):
+    _text, blocks = manual
+    titles = " | ".join(plain_text(b.spans) for b in blocks
+                        if b.kind == "heading" and b.level == 2)
+    for expected in ("O ecrã", "Os campos, um a um", "Ler os resultados",
+                     "Modelo e método de cálculo", "Ficheiro de inputs (CSV)",
+                     "Ficheiros de saída", "Ficheiro de cenário (.json)",
+                     "Pressupostos e limitações", "Nomenclatura", "Referências"):
+        assert expected in titles, f"falta a secção «{expected}»"
+
+
+def test_documentation_explains_every_field_of_the_form(window, manual):
+    """Um parametro novo no formulario tem de entrar na documentacao."""
+    text, _blocks = manual
+    labels = {getattr(window, name).label_text for name in dir(window)
+              if name.startswith("f_") and hasattr(getattr(window, name),
+                                                   "label_text")}
+    labels |= {column.label for column in MODE_COLUMNS + SUBSTRATE_COLUMNS}
+    assert len(labels) > 50
+    missing = sorted(label for label in labels if label not in text)
+    assert not missing, f"campos sem documentação: {missing}"
+
+
+def test_documentation_states_the_defaults_of_the_form(window, manual):
+    """Os valores por omissao escritos na documentacao sao os da aplicacao."""
+    _text, blocks = manual
+    documented = {}
+    for block in blocks:
+        if block.kind == "table" and "omissão" in [plain_text(c) for c in block.rows[0]]:
+            column = [plain_text(c) for c in block.rows[0]].index("omissão")
+            for row in block.rows[1:]:
+                documented[plain_text(row[0])] = plain_text(row[column])
+
+    for name in ("f_pressure", "f_cpsi", "f_wall", "f_length", "f_cyc_frac",
+                 "f_mode_frac", "f_cyc_slip", "f_mode_slip", "f_k0ads", "f_Eads",
+                 "f_k0NO", "f_ENO", "f_k0d", "f_E0d", "f_beta", "f_KK0",
+                 "f_fouling", "f_Deff", "f_Dmol", "f_Mbar", "f_f", "f_t_kNO",
+                 "f_v_max", "f_v_step", "f_v_min", "f_refine_tol", "f_alpha0",
+                 "f_dalpha", "f_alpha_min", "f_alpha_max", "f_max_iter",
+                 "f_bracket_tol", "f_nodes", "f_manual_rpm"):
+        field = getattr(window, name)
+        written = documented[field.label_text].split()[0]
+        assert float(written) == pytest.approx(field.value()), field.label_text
+
+
+def test_help_key_targets_exist_for_every_page(window, manual):
+    _text, blocks = manual
+    anchors = {b.anchor for b in blocks if b.kind == "heading"}
+    assert set(PAGE_HELP) == set(window.form.keys)
+    assert set(PAGE_HELP.values()) <= anchors
+
+
+# --------------------------------------------------------------------- #
+#  Documentacao: o separador na aplicacao
+# --------------------------------------------------------------------- #
+def test_documentation_tab_takes_the_place_of_the_work_area(window):
+    window.form.select("geometria")
+    assert window.docs_visible is False
+
+    window.show_docs()
+    window.update()
+    assert window.docs_visible is True
+    assert window.docs_link.active is True
+    assert window._paned.winfo_manager() == ""        # o formulario cedeu o lugar
+    assert window.docs.path == DOC_PATH
+    assert window.docs.toc.size() > 30                # indice com as seccoes
+    assert window.form.current == "geometria"         # a pagina nao mudou
+
+    window.form.select("alvos")                       # um separador volta atras
+    window.update()
+    assert window.docs_visible is False
+    assert window.docs_link.active is False
+    assert window._paned.winfo_manager() == "pack"
+    assert window.form.current == "alvos"
+
+
+def test_nothing_in_the_form_is_lost_while_reading(window):
+    window.f_cpsi.set(64)
+    window.show_docs()
+    window.show_work()
+    assert window.f_cpsi.value() == 64
+
+
+def test_help_key_opens_the_section_of_the_current_page(window):
+    window.form.select("cinetica")
+    window._on_help_key()
+    window.update()
+    assert window.docs_visible
+    assert window.docs.current_anchor() == PAGE_HELP["cinetica"]
+
+
+def test_documentation_search_covers_text_and_tables(window):
+    window.show_docs()
+    window.update()
+    docs = window.docs
+    docs.query.set("fouling")
+    total = docs.find()
+    kinds = {hit[1] for hit in docs._hits}
+    assert total > 10
+    assert kinds == {"text", "cell"}                  # texto corrido e tabelas
+    assert docs._count.cget("text") == f"1 de {total}"
+
+    docs.find(forward=False)                          # da a volta para o fim
+    assert docs._count.cget("text") == f"{total} de {total}"
+
+    docs.query.set("palavraquenaoexiste")
+    assert docs.find() == 0
+    assert docs._count.cget("text") == "sem resultados"
+    docs.query.set("")
+    docs.find()
+
+
+def test_links_to_other_project_files_open_in_the_reader(window):
+    window.show_docs()
+    docs = window.docs
+    docs.follow("README.md")
+    window.update()
+    assert docs.path.name == "README.md"
+    assert docs.btn_home.winfo_manager() == "pack"    # ha por onde voltar
+
+    docs.load(docs.home)
+    window.update()
+    assert docs.path == DOC_PATH
+    assert docs.btn_home.winfo_manager() == ""
+
+
+def test_missing_documentation_is_reported_not_fatal(window, tmp_path):
+    window.show_docs()
+    docs = window.docs
+    assert docs.load(tmp_path / "nao_existe.md") is False
+    assert docs.anchors == ["erro"]
+    assert docs.load(docs.home) is True
+
+
+def test_edited_documentation_is_read_again(window, tmp_path):
+    copy = tmp_path / "doc.md"
+    copy.write_text("# Um\n\ntexto\n", encoding="utf-8")
+    window.show_docs()
+    docs = window.docs
+    docs.load(copy)
+    assert docs.reload_if_changed() is False
+
+    copy.write_text("# Um\n\n## Dois\n\ntexto novo\n", encoding="utf-8")
+    import os
+    os.utime(copy, (time.time() + 5, time.time() + 5))
+    assert docs.reload_if_changed() is True
+    assert docs.anchors == ["um", "dois"]
+    docs.load(docs.home)
+
+
+def test_sidebar_tightens_up_in_a_short_window(window):
+    """Regressao: num ecra baixo o botao de correr tapava a ultima entrada."""
+    before = window.geometry()
+    try:
+        window.geometry("1280x640+0+0")
+        window.update()
+        window.update()
+        assert window._sidebar_compact is True
+        last_entry = window.docs_link
+        bottom = last_entry.winfo_rooty() + last_entry.winfo_height()
+        assert bottom <= window.btn_run.winfo_rooty()        # sem sobreposicao
+
+        window.geometry("1280x960+0+0")
+        window.update()
+        window.update()
+        assert window._sidebar_compact is False
+    finally:
+        window.geometry(before)
+        window.update()
+
+
+# --------------------------------------------------------------------- #
+#  Tema: fundos claros, texto escuro, azul e vermelho da marca
+# --------------------------------------------------------------------- #
+def _luminance(colour: str) -> float:
+    """Luminancia relativa (WCAG) de ``#RRGGBB``."""
+    channels = []
+    for i in (1, 3, 5):
+        c = int(colour[i:i + 2], 16) / 255.0
+        channels.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def test_backgrounds_are_light_and_text_is_dark():
+    for name in ("BG", "BG_PANEL", "BG_HEADER", "NAV_BG", "STATUS_BG",
+                 "SHEET_BG", "FIELD_BG", "TILE_BG", "TAB_BG", "LOG_BG"):
+        assert _luminance(getattr(C, name)) > 0.70, name
+    for name in ("TEXT", "FIELD_FG", "SHEET_FG", "NAV_FG", "LOG_FG"):
+        assert _luminance(getattr(C, name)) < 0.02, name
+
+
+def test_text_is_readable_on_its_background():
+    """Contraste minimo de 4.5:1 (WCAG AA) nas combinacoes que a janela usa."""
+    for fg, bg in (("TEXT", "BG_PANEL"), ("TEXT_DIM", "BG_PANEL"),
+                   ("TEXT_DIM", "BG"), ("TITLE", "BG"), ("NAV_FG", "NAV_BG"),
+                   ("NAV_GROUP", "NAV_BG"), ("NAV_ACTIVE_FG", "NAV_ACTIVE_BG"),
+                   ("TAB_FG", "TAB_BG"), ("BTN_FG", "BTN_BG"),
+                   ("GHOST_FG", "GHOST_BG"), ("RUN_FG", "RUN_BG"),
+                   ("SELECT_FG", "SELECT_BG"), ("SHEET_DIM", "SHEET_BG"),
+                   ("LOG_ERR", "LOG_BG"), ("LOG_OK", "LOG_BG"),
+                   ("TITLE", "HEAD_BG"), ("TEXT", "ERROR_FIELD"),
+                   ("BLUE", "SHEET_BG")):
+        ratio = _contrast(getattr(C, fg), getattr(C, bg))
+        assert ratio >= 4.5, f"{fg} sobre {bg}: {ratio:.2f}:1"
+
+
+def test_details_use_the_colours_of_the_logo():
+    assert (C.NAVY, C.RED) == ("#00275D", "#BC1020")
+    assert C.TITLE == C.RUN_BG == C.SELECT_BG == C.NAVY     # azul: titulos e accoes
+    assert C.ACCENT == C.FLAG == C.LOG_ERR == C.RED         # vermelho: marcas e erros

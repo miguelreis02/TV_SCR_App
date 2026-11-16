@@ -17,8 +17,11 @@ com Anaconda, o *Anaconda Prompt*:
 python app.py
 ```
 
-O guia de utilização da aplicação está em **[INSTRUCOES.md](INSTRUCOES.md)**;
-este README documenta o modelo e o porte.
+A documentação oficial do programa está em **[INSTRUCOES.md](INSTRUCOES.md)**
+— utilização, parâmetros, modelo e método, ficheiros de entrada e de saída,
+limitações — e lê-se também dentro da aplicação (entrada «Documentação» da
+barra lateral, ou `F1`). Este README documenta o porte a partir do MATLAB e a
+paridade numérica.
 
 ---
 
@@ -68,6 +71,7 @@ A **calibração de α** (`get_NOx_DG<k>.m` → `tvscr.calibrate_alpha`) reprodu
 | `tvscr_ui/`              | (novo) interface gráfica — não existia no MATLAB |
 | `tvscr_ui/paged.py`      | (novo) separadores e tabela de introdução manual |
 | `tvscr_ui/results.py`    | (novo) painel de resultados: resumo, modos, varrimento, gráfico e registo |
+| `tvscr_ui/docs.py`       | (novo) leitor da documentação (`INSTRUCOES.md`) dentro da aplicação |
 
 `sweep_engine.m` **não** foi portado: destinava-se a varrimentos 1-D/2-D em L e
 A, que deixaram de existir quando o método passou a varrer o volume.
@@ -96,7 +100,8 @@ Não há instalação do pacote: basta ter `TV_SCR_APP` no `sys.path`
 Duplo clique em `TV_SCR.bat`, ou `python app.py` num terminal com o Python
 certo (ver [INSTRUCOES.md](INSTRUCOES.md) §3).
 
-Fundo verde, campos brancos, um rótulo por parâmetro e ajuda ao passar o rato.
+Fundos claros e texto preto, com os pormenores no azul e no vermelho do
+logótipo da TecnoVeritas; um rótulo por parâmetro e ajuda ao passar o rato.
 As oito secções de inputs são páginas escondidas, escolhidas nos separadores da
 barra lateral, agrupados em três blocos (dados do projeto, modelo do
 catalisador, cálculo). Os dados do motor vêm de um CSV ou são introduzidos à
@@ -106,7 +111,8 @@ formulário, o painel de resultados mostra o volume crítico em destaque
 o *Registo* — a consola, com a mesma tabela que os scripts MATLAB imprimiam.
 Os inputs completos gravam-se e carregam-se como `.json` (o mesmo `RunScenario`
 que a biblioteca usa) — e, em introdução manual, esse `.json` leva os dados do
-motor dentro, ficando auto-suficiente.
+motor dentro, ficando auto-suficiente. A entrada «Documentação» mostra o
+`INSTRUCOES.md` na própria janela, com índice e procura.
 
 A interface não calcula nada: monta um `RunScenario` e chama a biblioteca.
 Ver [INSTRUCOES.md](INSTRUCOES.md) para o guia campo a campo e
@@ -325,7 +331,10 @@ python -m pytest tests -q
   balanço elementar e a margem de 10 % da coluna de consumo do dataset.
 - `tests/test_ui.py` — a janela monta o `RunScenario` certo a partir do
   formulário, rejeita valores inválidos levando o utilizador ao campo, e o
-  painel de resultados mostra os números que a biblioteca devolveu.
+  painel de resultados mostra os números que a biblioteca devolveu. Verifica
+  também a documentação: todas as ligações resolvem, todos os campos do
+  formulário estão documentados e os valores por omissão escritos coincidem
+  com os da aplicação.
 
 Os testes de paridade são automaticamente ignorados se os ficheiros MATLAB não
 estiverem presentes; os da interface, se não houver `tkinter` ou ecrã.

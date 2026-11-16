@@ -1,8 +1,19 @@
 # Alterações ao layout da interface
 
 Registo das alterações feitas à janela da aplicação (`tvscr_ui`) para a tornar
-mais fácil de usar. O guia de utilização atualizado está em
-[INSTRUCOES.md](INSTRUCOES.md) (§4 «O ecrã» e §7 «Ler os resultados»).
+mais fácil de usar. A documentação do programa está em
+[INSTRUCOES.md](INSTRUCOES.md).
+
+Houve duas revisões:
+
+- **Primeira revisão — layout** (§1 a §8): barra lateral, cartões, painel de
+  resultados, divisor, barra de estado.
+- **Segunda revisão — tema claro e documentação** (§9): paleta clara com o azul
+  e o vermelho do logótipo, documentação consultável dentro da aplicação, e
+  `INSTRUCOES.md` completado como documentação oficial.
+
+As capturas «depois» mostram o aspeto atual, já com o tema da segunda revisão;
+as capturas «antes» são da interface original.
 
 ---
 
@@ -80,8 +91,8 @@ agrupados sem mudar de ordem:
 | Modelo do catalisador | 4 · Cinética, 5 · Calibração |
 | Cálculo | 6 · Varrimento, 7 · Loop de α, 8 · Numérico e saída |
 
-O separador ativo tem fundo mais claro, texto a negrito e uma marca amarela à
-esquerda. A barra lateral não rola com o formulário.
+O separador ativo tem fundo mais claro, texto a negrito e uma marca colorida à
+esquerda (vermelha, desde a segunda revisão). A barra lateral não rola com o formulário.
 
 ### 4.2 Cabeçalho de página e navegação sequencial
 
@@ -261,7 +272,7 @@ A marca é limpa em cada nova tentativa, e reposta se o erro persistir.
 python -m pytest tests -q
 ```
 
-- **115 testes passam**, 29 são ignorados por faltarem os ficheiros de
+- No fim da primeira revisão: **115 testes passam**, 29 são ignorados por faltarem os ficheiros de
   referência do MATLAB e o `Tabela_Inputs_Final.csv` (não estão no
   repositório). Antes das alterações: 78 passam, 29 ignorados — os mesmos 29.
 - Os 10 testes da interface que dependem do CSV foram corridos à parte com um
@@ -304,3 +315,186 @@ Observações feitas durante o trabalho, **não alteradas** por estarem fora do
   mais alta; em páginas curtas sobra espaço verde por baixo dos cartões. É o
   custo de o divisor não saltar ao mudar de separador; arrastá-lo resolve caso
   a caso.
+
+---
+
+## 9. Segunda revisão: tema claro e documentação
+
+### 9.1 Âmbito
+
+Como na primeira revisão, **só a interface e a documentação mudaram**; o pacote
+de cálculo `tvscr` não foi tocado. Não há dependências novas: o leitor de
+documentação é escrito sobre o `tkinter`, sem conversor de Markdown externo.
+
+### 9.2 Tema claro, com as cores do logótipo
+
+O fundo verde deu lugar a fundos claros com texto preto. As duas cores de
+pormenor foram lidas do próprio logótipo (`tvscr_ui/assets/tecnoveritas.png`):
+
+| cor | valor | onde aparece |
+|---|---|---|
+| Azul-marinho | `#00275D` | Títulos, botão «Correr dimensionamento», texto dos botões, linha ou opção escolhida, valores em destaque no resumo, séries dos gráficos |
+| Vermelho | `#BC1020` | Filete por baixo do título, marca do separador ativo (barra lateral e painel de resultados), erros e volumes inadmissíveis |
+| Azul vivo | `#1F5FBF` | Contorno do campo com o cursor, marcador «i» de ajuda, ligações da documentação, barra de progresso |
+
+| elemento | antes (1.ª revisão) | agora |
+|---|---|---|
+| Janela e páginas | Verde-escuro | Cinzento-azulado muito claro (`#EEF1F5`) |
+| Cartões | Verde médio, texto branco | Branco, texto preto, título a azul-marinho |
+| Barra de título | Verde muito escuro | Branca (o logótipo funde-se), com filete vermelho |
+| Barra lateral e de estado | Verde muito escuro | Cinzento claro (`#E3E8EF`) |
+| Botão principal | Amarelo | Azul-marinho com texto branco |
+| Linha do volume crítico (tabelas) | Amarelo claro | Azul claro |
+| Balões de ajuda | Amarelo claro | Brancos, com contorno azul-marinho |
+| Gráfico | Séries a verde, estrela amarela | Séries a azul-marinho e vermelho, estrela azul |
+
+Pormenores:
+
+- Os campos continuam brancos; como os cartões passaram também a brancos, o
+  contorno dos campos é mais escuro que o dos cartões, para o campo se
+  distinguir.
+- O vermelho marca duas coisas diferentes, com formas diferentes: uma **barra
+  à esquerda** do separador ativo e um **ponto à direita** do separador com um
+  campo inválido.
+- A cor de seleção (linha de tabela, opção de lista) passou a ter par próprio
+  de fundo e texto — com o tema anterior reutilizava a cor dos cartões, o que
+  num tema claro a tornaria invisível.
+- O contraste entre texto e fundo é verificado por teste (mínimo 4.5:1, o
+  critério AA das WCAG) em todas as combinações que a janela usa.
+- Toda a paleta continua num único sítio, `tvscr_ui/theme.py`.
+
+![tema claro: dados do motor e resumo](docs/layout/depois_resumo.png)
+
+### 9.3 Documentação dentro da aplicação
+
+Nova entrada **Documentação** na barra lateral (grupo «Ajuda»). Mostra o
+`INSTRUCOES.md` no lugar do formulário e dos resultados; escolher um dos oito
+separadores, premir `Esc` ou o botão «Voltar ao dimensionamento» regressa ao
+trabalho. O formulário e um cálculo em curso não são afetados.
+
+| elemento | faz |
+|---|---|
+| Índice lateral | Secções do documento; um clique leva à secção, e a secção que está a ser lida fica realçada |
+| Procura | Realça as ocorrências no texto e nas tabelas e percorre-as (`Enter` / `Shift+Enter`), com contagem |
+| Ligações | Entre secções, para outros ficheiros Markdown do projeto (abrem no mesmo leitor) e para a Internet (abrem o navegador) |
+| `F1` | Abre a documentação **na secção do separador em que se está** |
+| `Ctrl+F` | Abre a documentação com o cursor na procura |
+
+Decisões:
+
+- **O que se lê é o ficheiro em disco.** Não há cópia nem conversão prévia: o
+  `INSTRUCOES.md` é lido quando a documentação é aberta, e relido se tiver sido
+  alterado. Há uma só fonte, que serve o GitHub e a aplicação.
+- **Leitor próprio de Markdown** (`tvscr_ui/docs.py`), limitado ao que a
+  documentação usa: títulos, parágrafos, listas, citações, tabelas, blocos de
+  código, filetes, negrito, itálico, código em linha, ligações e imagens. As
+  âncoras dos títulos seguem a regra do GitHub, para o índice funcionar igual
+  nos dois sítios.
+- **Tabelas como grelhas embutidas**, com cada célula a quebrar à sua largura;
+  as larguras são repartidas de novo quando a janela muda de tamanho.
+- Se o ficheiro não existir, o leitor di-lo e explica onde deve estar, em vez
+  de falhar.
+
+![documentação na aplicação](docs/layout/depois_documentacao.png)
+
+### 9.4 `INSTRUCOES.md` como documentação oficial
+
+O guia de utilização foi revisto e completado. O que existia mantém-se; o que
+faltava para o documento valer como referência foi acrescentado:
+
+| secção | conteúdo novo |
+|---|---|
+| Índice | Com ligações a todas as secções |
+| §1 | Âmbito do programa e o que ele não faz |
+| §2 | Versões mínimas das bibliotecas |
+| §4 | Entrada «Documentação», atalhos `F1`, `Ctrl+F` e `Esc` |
+| §6 | **Valor por omissão e intervalo aceite de cada campo**; composição dos combustíveis e AFR; fórmulas do limite MARPOL por Tier; parâmetros que existem na biblioteca mas não no formulário |
+| §10 | Mensagens de erro que faltavam |
+| §11 | **Modelo e método de cálculo**: cadeia de cálculo, geometria e escoamento, cinética, solver 1-D, grandezas de saída, loop de α, varrimento em volume |
+| §12 | **Especificação do CSV de inputs**: colunas, unidades, obrigatoriedade, exemplo |
+| §13 | **Colunas de todos os ficheiros de saída**, com unidades |
+| §14 | **Estrutura do cenário `.json`** e o que a interface lê dele |
+| §17 | **Pressupostos e limitações** do modelo, do método e do programa |
+| §18 | Nomenclatura e glossário |
+| §19 a §21 | Estrutura do projeto, referências bibliográficas e ficha técnica |
+
+Factos conferidos no código, e não só transcritos:
+
+- **Colunas obrigatórias do CSV** — testadas uma a uma. A coluna
+  `NO_out_[ppm]` tem de existir, embora os seus valores não entrem no
+  dimensionamento (o guia anterior não o dizia); `Engine_Speed_[rpm]` e
+  `Rated_Power_[kW]` também são obrigatórias.
+- **O exemplo de CSV da documentação** foi carregado na aplicação e corrido até
+  ao volume crítico.
+- **Solução de ureia, constantes do gás e formato do CSV** não são lidos do
+  formulário: a interface usa sempre os valores por omissão, mesmo que um
+  `.json` carregado traga outros. Está agora documentado (§6 e §14).
+- Três testes mantêm a documentação alinhada com o programa: todas as ligações
+  resolvem; **todos os campos do formulário aparecem na documentação**; e os
+  **valores por omissão escritos coincidem com os da aplicação**.
+
+### 9.5 Outras alterações
+
+- **Ficheiro CSV sem colunas de geometria.** Era válido, mas ao escolher o
+  motor aparecia um aviso de erro («não foi possível ler o motor»). Passou a
+  mostrar as condições de operação e a indicar que o comprimento se introduz
+  no separador 2.
+- **Fonte monoespaçada fora do Windows.** Sem a Consolas, a consola usava uma
+  fonte proporcional e as colunas do registo deixavam de alinhar. Passou a usar
+  a fonte fixa real do sistema. No Windows nada muda.
+- **Mais altura para vários resultados.** Com vários motores ou substratos, o
+  ajuste automático do divisor reserva mais altura ao painel de resultados
+  (uma linha da tabela de comparação por resultado, até cinco).
+- **Barra lateral em janelas baixas.** Com a entrada «Documentação», a barra
+  lateral deixou de caber num ecrã de 768 px de altura: o botão «Correr
+  dimensionamento» ficava por cima da última entrada. A barra passa a reduzir
+  o espaço entre entradas quando a janela é baixa, e a repô-lo quando há
+  altura.
+- Os botões «Gravar registo…» e «Limpar» ficavam brancos depois de o rato
+  passar por eles; corrigido.
+
+### 9.6 Ficheiros alterados na segunda revisão
+
+| ficheiro | alteração |
+|---|---|
+| `tvscr_ui/theme.py` | Paleta clara; cores da marca; cores de seleção, foco e progresso com nome próprio; tipos de letra da documentação; fonte fixa real |
+| `tvscr_ui/docs.py` | **Novo.** `parse_markdown` e `DocsView` |
+| `tvscr_ui/main_window.py` | Entrada «Documentação», `show_docs` / `show_work`, `F1`, `Ctrl+F`, `Esc`; filete do título; leitura de CSV sem geometria; altura para vários resultados |
+| `tvscr_ui/paged.py` | `NavLink`; `set_highlight` |
+| `tvscr_ui/widgets.py`, `tvscr_ui/results.py` | Cores do novo tema; filete do separador de resultados ativo; cores do gráfico |
+| `tests/test_ui.py` | 19 testes novos |
+| `INSTRUCOES.md` | Completado (§9.4) |
+| `README.md` | Descrição da interface e da documentação |
+| `docs/layout/*.png` | Capturas «depois» refeitas com o tema claro; captura da documentação |
+
+### 9.7 Verificação
+
+- **134 testes passam**, 29 ignorados (os mesmos de sempre, por falta dos
+  ficheiros de referência do MATLAB). Com um CSV sintético de cinco motores,
+  os 10 testes da interface que dependem de ficheiro também passam.
+- Testes novos: leitura do Markdown (blocos, estilos, âncoras); ligações,
+  secções, campos e valores por omissão da documentação; abrir e fechar a
+  documentação, `F1` por separador, procura no texto e nas tabelas, ligações a
+  outros ficheiros, ficheiro em falta, releitura após edição; barra lateral em
+  janela baixa; fundos claros, contraste e cores da marca.
+- Verificação visual por capturas de todas as páginas, de todos os separadores
+  de resultados e da documentação, a 1920 × 1080 e a 1366 × 768.
+
+**Limite da verificação**, como na primeira revisão: tudo foi corrido em Linux
+com ecrã virtual, **não em Windows**. A fonte e as métricas serão as da Segoe
+UI e da Consolas; convém abrir a aplicação no Windows, percorrer os separadores
+e a documentação, e fazer uma corrida.
+
+### 9.8 Notas
+
+- **A documentação descreve o código deste ramo.** O ramo
+  `claude/admiring-dirac-kxvlqy` altera a massa molar usada na conversão de
+  ppm em g/kWh (de NO, 30.01 g/mol, para NO₂, 46.01 g/mol). Se for integrado,
+  a §6 («Parâmetros que não estão no formulário») e a §11.5 do `INSTRUCOES.md`
+  têm de ser atualizadas — os números do exemplo da §7 também mudam.
+- **«Monolito»** está escrito sem acento na interface e, por coerência com ela,
+  na documentação; a grafia correta é «monólito». Corrigir obriga a mexer nos
+  rótulos da interface e nas âncoras da documentação ao mesmo tempo.
+- `examples/Resultados/cenario.json` é de uma versão anterior
+  (`volume_start_fraction`) e já não carrega; a §10 e a §14 do `INSTRUCOES.md`
+  explicam a mensagem que aparece nesse caso.

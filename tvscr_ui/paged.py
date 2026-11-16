@@ -21,7 +21,8 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 from .theme import C, F
 from .widgets import FieldError, Tooltip, ghost_button
 
-__all__ = ["PagedForm", "Column", "EditableTable", "ModeTable", "RadioGroup"]
+__all__ = ["PagedForm", "NavLink", "Column", "EditableTable", "ModeTable",
+           "RadioGroup"]
 
 
 # ====================================================================== #
@@ -87,15 +88,19 @@ class PagedForm(tk.Frame):
         self._pages: Dict[str, _Tab] = {}
         self._order: List[str] = []
         self._current: Optional[str] = None
+        self._highlight = True
+        self._group_labels: List[tk.Label] = []      # titulos de grupo, menos o 1.o
         self._on_change: Optional[Callable[[str], None]] = None
 
     # ------------------------------------------------------------------ #
     def add_group(self, title: str) -> None:
         """Titulo de um grupo de separadores (os que forem criados a seguir)."""
         first = not self.tabs.winfo_children()
-        tk.Label(self.tabs, text=title, bg=C.NAV_BG, fg=C.NAV_GROUP,
-                 font=F.SMALL_BOLD, anchor="w", padx=16).pack(
-                     fill="x", pady=(4 if first else 14, 3))
+        label = tk.Label(self.tabs, text=title, bg=C.NAV_BG, fg=C.NAV_GROUP,
+                         font=F.SMALL_BOLD, anchor="w", padx=16)
+        label.pack(fill="x", pady=(4 if first else 14, 3))
+        if not first:
+            self._group_labels.append(label)
 
     def add_page(self, key: str, label: str, tooltip: str = "") -> tk.Frame:
         """Cria uma pagina e o seu separador; devolve o frame da pagina.
@@ -143,7 +148,7 @@ class PagedForm(tk.Frame):
         return page
 
     def _paint(self, tab: "_Tab", hover: bool = False) -> None:
-        active = tab.key == self._current
+        active = tab.key == self._current and self._highlight
         bg = (C.NAV_ACTIVE_BG if active else C.NAV_HOVER if hover else C.NAV_BG)
         tab.row.configure(bg=bg)
         tab.flag.configure(bg=bg)
@@ -163,6 +168,7 @@ class PagedForm(tk.Frame):
         if key not in self._pages:
             raise KeyError(f"pagina desconhecida: {key}")
         self._current = key
+        self._highlight = True
         for tab in self._pages.values():
             self._paint(tab)
             if tab.key != key:
@@ -185,6 +191,23 @@ class PagedForm(tk.Frame):
         index = self._order.index(self._current)
         if index > 0:
             self.select(self._order[index - 1])
+
+    def set_compact(self, on: bool) -> None:
+        """Aperta (ou repoe) o espaco entre separadores, para janelas baixas."""
+        for tab in self._pages.values():
+            tab.button.configure(pady=2 if on else 6)
+        for label in self._group_labels:
+            label.pack_configure(pady=(7 if on else 14, 2 if on else 3))
+
+    def set_highlight(self, on: bool) -> None:
+        """Mostra ou esconde a marca do separador activo.
+
+        A janela esconde-a enquanto mostra outra coisa no lugar das paginas (a
+        documentacao); escolher um separador volta a mostra-la.
+        """
+        self._highlight = on
+        for tab in self._pages.values():
+            self._paint(tab)
 
     # ------------------------------------------------------------------ #
     def flag(self, key: str, on: bool = True) -> None:
@@ -233,6 +256,54 @@ class PagedForm(tk.Frame):
         return self._pages[key].page
 
 
+class NavLink(tk.Frame):
+    """Entrada da barra lateral que nao e uma pagina do formulario.
+
+    Tem o aspecto de um separador (marca a esquerda quando activa), mas apenas
+    chama ``command``: e a janela que decide o que mostrar.
+    """
+
+    def __init__(self, parent, label: str, command: Callable[[], None],
+                 tooltip: str = ""):
+        super().__init__(parent, bg=C.NAV_BG)
+        self._active = False
+        self.accent = tk.Frame(self, bg=C.NAV_BG, width=4)
+        self.accent.pack(side="left", fill="y")
+        self.button = tk.Button(self, text=label, relief="flat", bd=0,
+                                anchor="w", font=F.BASE, cursor="hand2",
+                                padx=12, pady=6, bg=C.NAV_BG, fg=C.NAV_FG,
+                                highlightthickness=0,
+                                activebackground=C.NAV_ACTIVE_BG,
+                                activeforeground=C.NAV_ACTIVE_FG,
+                                command=command)
+        self.button.pack(side="left", fill="x", expand=True)
+        if tooltip:
+            Tooltip(self.button, tooltip, delay_ms=700)
+        for widget in (self, self.button):
+            widget.bind("<Enter>", lambda _e: self._paint(hover=True), add="+")
+            widget.bind("<Leave>", lambda _e: self._paint(), add="+")
+
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def set_active(self, on: bool) -> None:
+        self._active = on
+        self._paint()
+
+    def set_compact(self, on: bool) -> None:
+        self.button.configure(pady=2 if on else 6)
+
+    def _paint(self, hover: bool = False) -> None:
+        bg = (C.NAV_ACTIVE_BG if self._active
+              else C.NAV_HOVER if hover else C.NAV_BG)
+        self.configure(bg=bg)
+        self.accent.configure(bg=C.ACCENT if self._active else bg)
+        self.button.configure(bg=bg,
+                              fg=C.NAV_ACTIVE_FG if self._active else C.NAV_FG,
+                              font=F.BOLD if self._active else F.BASE)
+
+
 class _Tab:
     """Um separador e a sua pagina."""
 
@@ -262,7 +333,7 @@ class RadioGroup(tk.Frame):
     """
 
     SIZE = 15
-    DOT = "#10281A"
+    DOT = C.NAVY
 
     def __init__(self, parent, variable: tk.StringVar,
                  options: Sequence[Tuple[str, str]],
@@ -303,7 +374,7 @@ class RadioGroup(tk.Frame):
         for value, canvas in self._indicators.items():
             canvas.delete("all")
             canvas.create_oval(1, 1, self.SIZE - 2, self.SIZE - 2,
-                               fill=C.FIELD_BG, outline=C.BORDER, width=1)
+                               fill=C.FIELD_BG, outline=C.FIELD_BORDER, width=1)
             if value == current:
                 canvas.create_oval(5, 5, self.SIZE - 6, self.SIZE - 6,
                                    fill=self.DOT, outline=self.DOT)
@@ -390,7 +461,8 @@ class EditableTable(tk.Frame):
                              bg=C.FIELD_BG, fg=C.FIELD_FG, font=F.BASE,
                              relief="flat", justify="right",
                              insertbackground=C.FIELD_FG, highlightthickness=1,
-                             highlightbackground=C.BORDER, highlightcolor=C.RUN_BG)
+                             highlightbackground=C.FIELD_BORDER,
+                             highlightcolor=C.FOCUS)
             entry.grid(row=grid_row, column=i + 1, padx=2, pady=1, sticky="ew",
                        ipady=1)
             var.trace_add("write", lambda *_a, w=entry: w.configure(bg=C.FIELD_BG))

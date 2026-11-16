@@ -107,7 +107,7 @@ class _Tile(tk.Frame):
         self._caption = tk.Label(self, text=caption, bg=self._normal_bg,
                                  fg=C.SHEET_DIM, font=F.SMALL_BOLD, anchor="w")
         self._caption.pack(fill="x", padx=12, pady=(8, 0))
-        self._value = tk.Label(self, text="—", bg=self._normal_bg, fg=C.BTN_FG,
+        self._value = tk.Label(self, text="—", bg=self._normal_bg, fg=C.TITLE,
                                font=F.KPI if key else F.KPI_SMALL, anchor="w",
                                pady=0)
         self._value.pack(fill="x", padx=12)
@@ -130,7 +130,7 @@ class _Tile(tk.Frame):
             label.configure(bg=bg)
         if caption is not None:
             self._caption.configure(text=caption)
-        self._value.configure(text=value, fg=C.LOG_ERR if error else C.BTN_FG)
+        self._value.configure(text=value, fg=C.LOG_ERR if error else C.TITLE)
         self._note.configure(text=note)
 
     @property
@@ -172,15 +172,20 @@ class ResultsPanel(tk.Frame):
         area.columnconfigure(0, weight=1)
 
         self._tabs: Dict[str, Tuple[tk.Button, tk.Frame]] = {}
+        self._lines: Dict[str, tk.Frame] = {}     # filete do separador activo
         self._labels = dict(TABS)
         for key, label in TABS:
-            button = tk.Button(bar, text=label, relief="flat", bd=0,
+            holder = tk.Frame(bar, bg=C.BG)
+            holder.pack(side="left", padx=(0, 2))
+            self._lines[key] = tk.Frame(holder, bg=C.BG, height=3)
+            self._lines[key].pack(fill="x")
+            button = tk.Button(holder, text=label, relief="flat", bd=0,
                                font=F.BASE, cursor="hand2", padx=16, pady=6,
                                bg=C.TAB_BG, fg=C.TAB_FG, highlightthickness=0,
                                activebackground=C.TAB_HOVER,
                                activeforeground=C.TAB_FG,
                                command=lambda k=key: self.select(k))
-            button.pack(side="left", padx=(0, 2))
+            button.pack()
             page = tk.Frame(area, bg=C.SHEET_BG)
             page.grid(row=0, column=0, sticky="nsew")
             self._tabs[key] = (button, page)
@@ -214,6 +219,7 @@ class ResultsPanel(tk.Frame):
                              activeforeground=(C.TAB_ACTIVE_FG if active
                                                else C.TAB_FG),
                              font=F.BOLD if active else F.BASE)
+            self._lines[other].configure(bg=C.ACCENT if active else C.BG)
             if active:
                 page.tkraise()
         if key == "grafico":
@@ -294,7 +300,7 @@ class ResultsPanel(tk.Frame):
         block = tk.Frame(self._empty, bg=C.SHEET_BG)
         block.place(relx=0.5, rely=0.45, anchor="center")
         self._empty_title = tk.Label(block, text=EMPTY_TITLE, bg=C.SHEET_BG,
-                                     fg=C.BTN_FG, font=F.KPI_SMALL, anchor="w")
+                                     fg=C.TITLE, font=F.KPI_SMALL, anchor="w")
         self._empty_title.pack(fill="x", pady=(0, 8))
         self._empty_steps = tk.Label(block, text="\n".join(EMPTY_STEPS),
                                      bg=C.SHEET_BG, fg=C.SHEET_DIM, font=F.BASE,
@@ -385,11 +391,9 @@ class ResultsPanel(tk.Frame):
                              "MATLAB imprimiam.", bg=C.SHEET_BG, fg=C.SHEET_DIM,
                  font=F.SMALL, anchor="w").pack(side="left")
         clear = flat_button(tools, "Limpar", self.console.clear, small=True)
-        clear.configure(bg=C.BTN_ACTIVE)
         clear.pack(side="right")
         if on_save_log is not None:
             save = flat_button(tools, "Gravar registo…", on_save_log, small=True)
-            save.configure(bg=C.BTN_ACTIVE)
             save.pack(side="right", padx=(0, 6))
         self.console.pack(fill="both", expand=True)
         self.console.on_write = self._on_log_write
@@ -400,6 +404,11 @@ class ResultsPanel(tk.Frame):
     @property
     def has_results(self) -> bool:
         return bool(self._items)
+
+    @property
+    def n_results(self) -> int:
+        """Quantos resultados ha para comparar (motores, ou pares de substrato)."""
+        return len(self._items)
 
     @property
     def selected_title(self) -> Optional[str]:
@@ -689,21 +698,21 @@ def _figure_png(result, width_px: int, height_px: int) -> Optional[bytes]:
     order = np.argsort(result.volume_m3)
     volume = result.volume_m3[order]
     ok = result.ok[order].astype(bool)
-    green, red, grey = C.LOG_OK, C.LOG_ERR, "#5F6B64"
+    blue, red, grey = C.NAVY, C.RED, "#6B7785"
     critical = (result.critical_volume_m3
                 if np.isfinite(result.critical_volume_m3) else None)
 
     def series(ax, values, marker):
         values = values[order]
-        ax.plot(volume[ok], values[ok], marker + "-", color=green, lw=1.4,
+        ax.plot(volume[ok], values[ok], marker + "-", color=blue, lw=1.4,
                 ms=4, label="admissível")
         if (~ok).any():
             ax.plot(volume[~ok], values[~ok], "x", color=red, ms=7, mew=1.6,
                     label="inadmissível")
         if critical is not None:
             j = int(np.argmin(np.abs(volume - critical)))
-            ax.plot(volume[j], values[j], "*", ms=11, mfc=C.ACCENT, mec="k",
-                    mew=0.6, label="volume crítico", zorder=5)
+            ax.plot(volume[j], values[j], "*", ms=12, mfc=C.STAR, mec=C.NAVY,
+                    mew=0.8, label="volume crítico", zorder=5)
 
     series(ax_nox, result.NO_cycle, "o")
     ax_nox.axhline(result.targets.cycle_NO_gkWh, ls="--", color=red, lw=1.1,
@@ -720,12 +729,12 @@ def _figure_png(result, width_px: int, height_px: int) -> Optional[bytes]:
 
     for m, load in enumerate(result.load_pct):
         ax_alpha.plot(volume, result.alpha[order, m], "o-", lw=1.2, ms=3,
-                      label=f"{load:g} %")
+                      color=C.SERIES[m % len(C.SERIES)], label=f"{load:g} %")
     ax_alpha.set_title(r"$\alpha$ por modo [–]")
     ax_alpha.legend(fontsize=7, loc="best", framealpha=0.9, title="carga",
                     title_fontsize=7)
 
-    ax_urea.plot(volume, result.urea_cycle[order], "d-", color=green, lw=1.4,
+    ax_urea.plot(volume, result.urea_cycle[order], "d-", color=blue, lw=1.4,
                  ms=4)
     ax_urea.set_title("Ureia no ciclo [L/h]")
 

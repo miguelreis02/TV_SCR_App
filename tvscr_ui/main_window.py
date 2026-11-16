@@ -36,7 +36,9 @@ from tvscr import (AlphaLoopOptions, EmissionTargets, EngineDataset,
                    KineticParameters, KineticTuning, RunScenario,
                    SolverOptions, SubstrateGeometry, VolumeSweepOptions)
 
-from .paged import Column, EditableTable, ModeTable, PagedForm, RadioGroup
+from .docs import DOC_PATH, DocsView
+from .paged import (Column, EditableTable, ModeTable, NavLink, PagedForm,
+                    RadioGroup)
 from .results import ResultsPanel
 from .theme import C, F, init_fonts
 from .widgets import (CheckField, ChoiceField, FieldError, FloatField,
@@ -55,18 +57,35 @@ FUELS = ["HFO", "MDO", "MGO", "LSFO"]
 TIERS = ["III", "II", "I"]
 
 RUN_LABEL = "▶  Correr dimensionamento"
-SHORTCUTS_HINT = ("F5  correr   ·   Ctrl+O  carregar cenário   ·   "
-                  "Ctrl+S  gravar cenário   ·   Ctrl+PgUp / PgDn  mudar de separador")
+SHORTCUTS_HINT = ("F1  documentação   ·   F5  correr   ·   Ctrl+O / Ctrl+S  "
+                  "carregar / gravar cenário   ·   Ctrl+PgUp / PgDn  separador")
+
+#: Secção da documentação que explica cada página de inputs (âncora do título
+#: em INSTRUCOES.md): é onde o F1 abre a documentação.
+PAGE_HELP = {
+    "motor": "1--dados-do-motor",
+    "geometria": "2--geometria-do-monolito",
+    "alvos": "3--alvos-de-emissão",
+    "cinetica": "4--cinética-e-transporte",
+    "calibracao": "5--calibração-multiplicadores",
+    "varrimento": "6--varrimento-em-volume",
+    "alpha": "7--loop-de-α",
+    "saida": "8--numérico-e-saída",
+}
 NO_DATASET_INFO = ("Nenhum ficheiro carregado. Escolha o CSV em «Procurar…»: os "
                    "motores que ele trouxer aparecem na lista «Motor».")
 
 SIDEBAR_WIDTH = 232          # largura minima da barra lateral [px]
+SIDEBAR_PADDING = 54         # margens verticais entre os blocos da barra lateral
 CARD_GAP = 12                # espaco entre cartoes [px]
+#: Como o conteudo ocupa a area principal (dimensionamento ou documentacao).
+MAIN_PACK = dict(fill="both", expand=True, padx=(14, 12), pady=(12, 8))
 # Altura [px] que o ajuste automatico do divisor reserva ao painel de
 # resultados: pouca enquanto esta vazio (a prioridade e o formulario), mais
 # quando ha um calculo a correr ou resultados para ler.
 RESULTS_IDLE_HEIGHT = 170
 RESULTS_MIN_HEIGHT = 270
+RESULTS_ROW_HEIGHT = 26      # por cada resultado a mais na tabela de comparacao
 RESULTS_START_HEIGHT = 330   # altura dos resultados quando a janela abre
 FORM_START_HEIGHT = 540      # a pagina mais alta (tabela manual de 4 modos)
 SMALL_SCREEN_HEIGHT = 900    # abaixo disto [px de ecra] a janela abre maximizada
@@ -121,6 +140,8 @@ class MainWindow(tk.Tk):
         self._dataset: Optional[EngineDataset] = None
         self._logo_image: Optional[tk.PhotoImage] = None
         self._sash_moved = False          # o utilizador arrastou o divisor?
+        self._sidebar_compact = False     # barra lateral apertada (janela baixa)?
+        self._sidebar_need = 0            # altura que ela pede sem apertar [px]
 
         self._build_header()
         self._build_statusbar()
@@ -144,8 +165,8 @@ class MainWindow(tk.Tk):
             style.theme_use("clam")
         style.configure("TVSCR.TCombobox",
                         fieldbackground=C.FIELD_BG, background=C.FIELD_BG,
-                        foreground=C.FIELD_FG, arrowcolor=C.BTN_FG,
-                        bordercolor=C.BORDER, lightcolor=C.FIELD_BG,
+                        foreground=C.FIELD_FG, arrowcolor=C.NAVY,
+                        bordercolor=C.FIELD_BORDER, lightcolor=C.FIELD_BG,
                         darkcolor=C.FIELD_BG, padding=3)
         style.map("TVSCR.TCombobox",
                   fieldbackground=[("readonly", C.FIELD_BG),
@@ -154,8 +175,8 @@ class MainWindow(tk.Tk):
                   selectforeground=[("readonly", C.FIELD_FG)])
         self.option_add("*TCombobox*Listbox.background", C.FIELD_BG)
         self.option_add("*TCombobox*Listbox.foreground", C.FIELD_FG)
-        self.option_add("*TCombobox*Listbox.selectBackground", C.BG_PANEL)
-        self.option_add("*TCombobox*Listbox.selectForeground", C.TEXT)
+        self.option_add("*TCombobox*Listbox.selectBackground", C.SELECT_BG)
+        self.option_add("*TCombobox*Listbox.selectForeground", C.SELECT_FG)
         self.option_add("*TCombobox*Listbox.font", F.BASE)
 
         # --- tabelas de resultados ---
@@ -164,31 +185,29 @@ class MainWindow(tk.Tk):
                         font=F.BASE, borderwidth=0, relief="flat",
                         rowheight=F.BASE.metrics("linespace") + 8)
         style.configure("TVSCR.Treeview.Heading", background=C.HEAD_BG,
-                        foreground=C.BTN_FG, font=F.BOLD, relief="flat",
+                        foreground=C.TITLE, font=F.BOLD, relief="flat",
                         padding=(6, 4))
         # So o estado "selected" no mapa: assim as cores das etiquetas (linha do
         # volume critico, linhas inadmissiveis) nao sao tapadas pelo tema.
         style.map("TVSCR.Treeview",
-                  background=[("selected", C.BG_PANEL)],
-                  foreground=[("selected", C.TEXT)])
+                  background=[("selected", C.SELECT_BG)],
+                  foreground=[("selected", C.SELECT_FG)])
         style.map("TVSCR.Treeview.Heading", background=[("active", C.HEAD_BG)])
 
-        # --- barras de rolamento: claras na folha, escuras sobre verde ---
-        for prefix, thumb, trough, arrow, hover in (
-                ("TVSCR", C.SCROLL, C.SCROLL_TROUGH, C.BTN_FG, C.BORDER),
-                ("TVSCRDark", C.BORDER, C.BG_HEADER, C.TEXT, C.NAV_ACTIVE_BG)):
-            for orient in ("Vertical", "Horizontal"):
-                name = f"{prefix}.{orient}.TScrollbar"
-                style.configure(name, background=thumb, troughcolor=trough,
-                                bordercolor=trough, lightcolor=thumb,
-                                darkcolor=thumb, arrowcolor=arrow,
-                                relief="flat", arrowsize=13)
-                style.map(name, background=[("disabled", trough),
-                                            ("active", hover)])
+        # --- barras de rolamento ---
+        for orient in ("Vertical", "Horizontal"):
+            name = f"TVSCR.{orient}.TScrollbar"
+            style.configure(name, background=C.SCROLL,
+                            troughcolor=C.SCROLL_TROUGH,
+                            bordercolor=C.SCROLL_TROUGH, lightcolor=C.SCROLL,
+                            darkcolor=C.SCROLL, arrowcolor=C.NAVY,
+                            relief="flat", arrowsize=13)
+            style.map(name, background=[("disabled", C.SCROLL_TROUGH),
+                                        ("active", C.FIELD_BORDER)])
 
-        style.configure("TVSCR.Horizontal.TProgressbar", troughcolor=C.BG,
-                        background=C.ACCENT, bordercolor=C.BG_HEADER,
-                        lightcolor=C.ACCENT, darkcolor=C.ACCENT)
+        style.configure("TVSCR.Horizontal.TProgressbar", troughcolor=C.BG_PANEL,
+                        background=C.PROGRESS, bordercolor=C.BORDER,
+                        lightcolor=C.PROGRESS, darkcolor=C.PROGRESS)
 
     def _button(self, parent, text, command, primary: bool = False, **kw):
         if not primary:
@@ -197,7 +216,8 @@ class MainWindow(tk.Tk):
                            font=F.BOLD, cursor="hand2", padx=14, pady=9, bd=0,
                            bg=C.RUN_BG, fg=C.RUN_FG, highlightthickness=0,
                            activebackground=C.RUN_ACTIVE,
-                           activeforeground=C.RUN_FG, **kw)
+                           activeforeground=C.RUN_FG,
+                           disabledforeground=C.RUN_DISABLED_FG, **kw)
         button.bind("<Enter>", lambda _e: str(button.cget("state")) != "disabled"
                     and button.configure(bg=C.RUN_ACTIVE), add="+")
         button.bind("<Leave>", lambda _e: button.configure(bg=C.RUN_BG), add="+")
@@ -229,19 +249,24 @@ class MainWindow(tk.Tk):
         tk.Label(text, text=APP_SUBTITLE, bg=C.BG_HEADER, fg=C.TEXT_DIM,
                  font=F.SUBTITLE, anchor="w").pack(fill="x", padx=16, pady=(2, 12))
 
+        # Filete com o vermelho do logotipo, a separar o titulo do resto.
+        self._header_rule = tk.Frame(self, bg=C.RED, height=3)
+        self._header_rule.pack(fill="x")
+
     # ------------------------------------------------------------------ #
     #  Barra de estado (fundo da janela)
     # ------------------------------------------------------------------ #
     def _build_statusbar(self) -> None:
-        bar = tk.Frame(self, bg=C.BG_HEADER)
+        bar = tk.Frame(self, bg=C.STATUS_BG)
         self._status_bar = bar
         bar.pack(side="bottom", fill="x")
+        tk.Frame(self, bg=C.BORDER, height=1).pack(side="bottom", fill="x")
         self.progress = ttk.Progressbar(bar, mode="indeterminate", length=150,
                                         style="TVSCR.Horizontal.TProgressbar")
-        self.status = tk.Label(bar, text="Pronto", bg=C.BG_HEADER, fg=C.TEXT,
+        self.status = tk.Label(bar, text="Pronto", bg=C.STATUS_BG, fg=C.TEXT,
                                font=F.SMALL, anchor="w")
         self.status.pack(side="left", padx=(16, 10), pady=5)
-        tk.Label(bar, text=SHORTCUTS_HINT, bg=C.BG_HEADER, fg=C.NAV_GROUP,
+        tk.Label(bar, text=SHORTCUTS_HINT, bg=C.STATUS_BG, fg=C.NAV_GROUP,
                  font=F.SMALL, anchor="e").pack(side="right", padx=16)
 
     def _set_status(self, text: str) -> None:
@@ -261,14 +286,20 @@ class MainWindow(tk.Tk):
             width=max(SIDEBAR_WIDTH, F.BOLD.measure(RUN_LABEL) + 46))
         self._sidebar.pack(side="left", fill="y")
         self._sidebar.pack_propagate(False)
+        tk.Frame(body, bg=C.BORDER, width=1).pack(side="left", fill="y")
+
+        # Area principal: o dimensionamento (formulario + resultados) ou, no
+        # seu lugar, a documentacao.
+        self._main = tk.Frame(body, bg=C.BG)
+        self._main.pack(side="left", fill="both", expand=True)
+        self.docs: Optional[DocsView] = None       # criada quando for pedida
 
         # Divisor arrastavel entre o formulario e os resultados.
-        paned = tk.PanedWindow(body, orient="vertical", bg=C.BG, bd=0,
+        paned = tk.PanedWindow(self._main, orient="vertical", bg=C.BG, bd=0,
                                sashwidth=10, sashrelief="flat",
                                opaqueresize=True,
                                sashcursor="sb_v_double_arrow")
-        paned.pack(side="left", fill="both", expand=True, padx=(14, 12),
-                   pady=(12, 8))
+        paned.pack(**MAIN_PACK)
         self._paned = paned
         paned.bind("<B1-Motion>", self._on_sash_drag, add="+")
         paned.bind("<Double-Button-1>", self._on_sash_reset, add="+")
@@ -277,6 +308,7 @@ class MainWindow(tk.Tk):
         self._build_pages(paned)
         self._build_results(paned)
         self._build_sidebar_actions()
+        self._sidebar.bind("<Configure>", self._fit_sidebar, add="+")
 
     # ------------------------------------------------------------------ #
     #  Paginas de inputs
@@ -292,7 +324,7 @@ class MainWindow(tk.Tk):
 
         canvas = tk.Canvas(holder, bg=C.BG, highlightthickness=0, height=420)
         vbar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview,
-                             style="TVSCRDark.Vertical.TScrollbar")
+                             style="TVSCR.Vertical.TScrollbar")
         canvas.configure(yscrollcommand=vbar.set)
         canvas.grid(row=0, column=0, sticky="nsew")
         vbar.grid(row=0, column=1, sticky="ns")
@@ -341,7 +373,13 @@ class MainWindow(tk.Tk):
             "alpha", "7 · Loop de α", "Procura do doseamento admissível"))
         self._build_output_page(self.form.add_page(
             "saida", "8 · Numérico e saída", "Malha do solver e ficheiros"))
-        self.form.on_change(lambda _key: self._form_canvas.yview_moveto(0))
+        self.form.on_change(self._on_page_change)
+
+    def _on_page_change(self, _key: str) -> None:
+        """Escolher um separador mostra a pagina no topo -- e o dimensionamento,
+        se a documentacao estiver a ocupar o lugar dele."""
+        self._form_canvas.yview_moveto(0)
+        self.show_work()
 
     def _sync_form_height(self, _event=None) -> None:
         """Ajusta o divisor ao conteudo do formulario, ate um tecto razoavel.
@@ -365,9 +403,14 @@ class MainWindow(tk.Tk):
         # A pagina MAIS ALTA, e nao a que esta a vista: o divisor nao salta
         # ao trocar de separador.
         needed = self.form.tallest_height() + 2
-        busy = self._running or self.results.has_results
-        limit = max(int(total * 0.45),
-                    total - (RESULTS_MIN_HEIGHT if busy else RESULTS_IDLE_HEIGHT))
+        if self._running or self.results.has_results:
+            # Com varios resultados, mais altura: uma linha da tabela de
+            # comparacao por cada um (ate cinco).
+            extra = min(max(self.results.n_results - 1, 0), 4)
+            reserve = RESULTS_MIN_HEIGHT + extra * RESULTS_ROW_HEIGHT
+        else:
+            reserve = RESULTS_IDLE_HEIGHT
+        limit = max(int(total * 0.45), total - reserve)
         with contextlib.suppress(tk.TclError):
             self._paned.sash_place(0, 0, max(150, min(needed, limit)))
 
@@ -872,6 +915,8 @@ class MainWindow(tk.Tk):
         """Accoes sobre o cenario e, sempre visivel, o botao de correr."""
         scenario = tk.Frame(self._sidebar, bg=C.NAV_BG)
         scenario.pack(fill="x", pady=(14, 0))
+        self._side_boxes = [scenario]
+        self._side_buttons: List[tk.Button] = []
         tk.Label(scenario, text="CENÁRIO", bg=C.NAV_BG, fg=C.NAV_GROUP,
                  font=F.SMALL_BOLD, anchor="w", padx=16).pack(fill="x",
                                                               pady=(0, 3))
@@ -888,7 +933,21 @@ class MainWindow(tk.Tk):
             button.bind("<Leave>", lambda _e, b=button: b.configure(bg=C.NAV_BG),
                         add="+")
             button.pack(fill="x")
+            self._side_buttons.append(button)
             Tooltip(button, tip, delay_ms=700)
+
+        help_box = tk.Frame(self._sidebar, bg=C.NAV_BG)
+        help_box.pack(fill="x", pady=(14, 0))
+        self._side_boxes.append(help_box)
+        tk.Label(help_box, text="AJUDA", bg=C.NAV_BG, fg=C.NAV_GROUP,
+                 font=F.SMALL_BOLD, anchor="w", padx=16).pack(fill="x",
+                                                              pady=(0, 3))
+        self.docs_link = NavLink(
+            help_box, "Documentação", self.show_docs,
+            tooltip="Documentação do programa: utilização, parâmetros, modelo, "
+                    "ficheiros de entrada e de saída (F1 abre-a na secção do "
+                    "separador em que está).")
+        self.docs_link.pack(fill="x")
 
         run = tk.Frame(self._sidebar, bg=C.NAV_BG)
         self._actions_bar = run
@@ -898,6 +957,35 @@ class MainWindow(tk.Tk):
         Tooltip(self.btn_run, "Corre o varrimento em volume com os inputs de "
                               "todos os separadores (F5).", delay_ms=700)
 
+    def _fit_sidebar(self, _event=None) -> None:
+        """Aperta a barra lateral quando a janela e baixa de mais para ela.
+
+        Num portatil de 768 px de altura os separadores, as accoes do cenario,
+        a documentacao e o botao de correr nao cabiam todos: o botao ficava por
+        cima da ultima entrada. Com o espaco entre entradas reduzido, cabem.
+        """
+        height = self._sidebar.winfo_height()
+        if height <= 1:
+            return
+        if not self._sidebar_compact:
+            needed = SIDEBAR_PADDING + sum(
+                child.winfo_reqheight() for child in self._sidebar.winfo_children())
+            if needed <= height:
+                return
+            self._sidebar_need = needed
+            compact = True
+        elif height >= self._sidebar_need + 8:
+            compact = False
+        else:
+            return
+        self._sidebar_compact = compact
+        self.form.set_compact(compact)
+        self.docs_link.set_compact(compact)
+        for button in self._side_buttons:
+            button.configure(pady=1 if compact else 5)
+        for box in self._side_boxes:
+            box.pack_configure(pady=(7 if compact else 14, 0))
+
     def _bind_shortcuts(self) -> None:
         def call(action):
             def handler(_event=None):
@@ -905,6 +993,10 @@ class MainWindow(tk.Tk):
                 return "break"
             return handler
 
+        self.bind("<F1>", call(self._on_help_key))
+        self.bind("<Escape>", lambda _e: self.show_work())
+        for key in ("f", "F"):
+            self.bind(f"<Control-{key}>", call(self._on_find_key))
         self.bind("<F5>", call(self._on_run))
         self.bind("<Control-Return>", call(self._on_run))
         for key in ("o", "O"):                       # com e sem Caps Lock
@@ -913,6 +1005,52 @@ class MainWindow(tk.Tk):
             self.bind(f"<Control-{key}>", call(self._on_save_scenario))
         self.bind("<Control-Next>", call(self.form.select_next))
         self.bind("<Control-Prior>", call(self.form.select_previous))
+
+    # ------------------------------------------------------------------ #
+    #  Documentacao
+    # ------------------------------------------------------------------ #
+    @property
+    def docs_visible(self) -> bool:
+        return self.docs is not None and bool(self.docs.winfo_manager())
+
+    def show_docs(self, anchor: Optional[str] = None) -> None:
+        """Mostra a documentacao no lugar do dimensionamento.
+
+        ``anchor`` e a ancora do titulo a por no topo; sem ela, a documentacao
+        abre onde tinha ficado. O calculo, se estiver a correr, continua.
+        """
+        if self.docs is None:
+            self.docs = DocsView(self._main, DOC_PATH, on_close=self.show_work)
+        elif anchor and self.docs.path != self.docs.home:
+            self.docs.load(self.docs.home)
+        elif not self.docs_visible:
+            self.docs.reload_if_changed()      # o ficheiro pode ter sido editado
+        if not self.docs_visible:
+            self._paned.pack_forget()
+            self.docs.pack(**MAIN_PACK)
+            self.form.set_highlight(False)
+            self.docs_link.set_active(True)
+        if anchor:
+            self.update_idletasks()
+            self.docs.goto(anchor)
+
+    def show_work(self) -> None:
+        """Volta ao dimensionamento (formulario e resultados)."""
+        if not self.docs_visible:
+            return
+        self.docs.pack_forget()
+        self._paned.pack(**MAIN_PACK)
+        self.form.set_highlight(True)
+        self.docs_link.set_active(False)
+
+    def _on_help_key(self) -> None:
+        """F1: a documentacao, na seccao do separador em que se esta."""
+        self.show_docs(PAGE_HELP.get(self.form.current))
+
+    def _on_find_key(self) -> None:
+        """Ctrl+F: procura na documentacao (abre-a, se for preciso)."""
+        self.show_docs()
+        self.docs.focus_search()
 
     def _fit_to_screen(self) -> None:
         """Ajusta a janela ao conteudo, sem passar dos limites do ecra."""
@@ -987,17 +1125,31 @@ class MainWindow(tk.Tk):
         engine = self.f_engine.value()
         if not engine:
             return
+        from_file = True
         try:
-            case = self._dataset.build_case(engine)
+            try:
+                case = self._dataset.build_case(engine)
+            except ValueError:
+                # Ficheiro sem colunas de geometria: e valido. O comprimento
+                # vem do separador da Geometria; aqui so se leem as condicoes
+                # de operacao, que nao dependem dele.
+                from_file = False
+                case = self._dataset.build_case(engine, length_m=1.0,
+                                                frontal_area_m2=1.0)
         except Exception as exc:
             self.console.write(f"Aviso ao ler o motor {engine}: {exc}", "erro")
             self.engine_info.configure(
                 text=f"Não foi possível ler o motor {engine}: {exc}")
             return
-        self.f_length.set(f"{case.geometry.length_m:g}")
+        if from_file:
+            self.f_length.set(f"{case.geometry.length_m:g}")
+            length_note = (f"L sugerido pelo ficheiro = "
+                           f"{case.geometry.length_m:.3f} m")
+        else:
+            length_note = ("o ficheiro não traz o comprimento: indique-o no "
+                           "separador 2 · Geometria")
         self.console.write(
-            f"{engine}: {case.n_modes} modos · L sugerido pelo ficheiro = "
-            f"{case.geometry.length_m:.3f} m · "
+            f"{engine}: {case.n_modes} modos · {length_note} · "
             f"limite = {case.nox_limit_gkWh:.4f} g/kWh")
         self.console.write(
             f"    caudal de escape: {case.mass_flow_kgs.min():.3f} a "
@@ -1010,8 +1162,7 @@ class MainWindow(tk.Tk):
                  f"{case.mass_flow_kgs.min():.3f} a "
                  f"{case.mass_flow_kgs.max():.3f} kg/s  ·  NO à entrada "
                  f"{case.NO_in_ppm.min():.0f} a {case.NO_in_ppm.max():.0f} ppm"
-                 f"  ·  L sugerido pelo ficheiro = "
-                 f"{case.geometry.length_m:.3f} m")
+                 f"  ·  {length_note}")
 
     def _update_engine_state(self) -> None:
         """Com «todos os motores», a escolha do motor fica inerte."""
